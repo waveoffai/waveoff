@@ -35,31 +35,31 @@ jobs:
     name: Unit and API-server tests
     runs-on: ubuntu-latest
     steps:
-      - run: echo "documentation-only change: no code to test"
+      - run: echo 'documentation-only change; no code to test'
 
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - run: echo "documentation-only change: no code to lint"
+      - run: echo 'documentation-only change; no code to lint'
 
   integration:
     name: LangGraph integration
     runs-on: ubuntu-latest
     steps:
-      - run: echo "documentation-only change: no code to exercise"
+      - run: echo 'documentation-only change; no code to exercise'
 
   e2e:
     name: End-to-end
     runs-on: ubuntu-latest
     steps:
-      - run: echo "documentation-only change: no cluster needed"
+      - run: echo 'documentation-only change; no cluster needed'
 
   build:
     name: Build and CLI smoke test
     runs-on: ubuntu-latest
     steps:
-      - run: echo "documentation-only change: nothing to build"
+      - run: echo 'documentation-only change; nothing to build'
 
   links:
     name: Documentation links

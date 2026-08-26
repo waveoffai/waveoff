@@ -44,6 +44,26 @@ while IFS= read -r line; do
   fi
 done < <(grep -rn 'uses:' .github/workflows/ 2>/dev/null || true)
 
+# 1b. The workflow must actually parse.
+#
+# GitHub reports an unparseable workflow as a failed run named after the file,
+# with no jobs and no log — which is a slow and confusing way to find out that a
+# plain scalar cannot contain ": ". Catching it here costs nothing.
+if python3 -c 'import yaml' 2>/dev/null; then
+  for wf in .github/workflows/*.y*ml; do
+    if ! python3 -c "import sys,yaml; yaml.safe_load(open(sys.argv[1]))" "$wf" 2>/dev/null; then
+      msg=$(python3 -c "import sys,yaml
+try:
+    yaml.safe_load(open(sys.argv[1]))
+except Exception as e:
+    print(e)" "$wf" 2>&1 | head -2)
+      note "$wf is not valid YAML, so GitHub will reject it: $msg"
+    fi
+  done
+else
+  echo "note: pyyaml is unavailable, so workflow syntax was not checked" >&2
+fi
+
 # 2. No ${{ }} inside a run: block.
 #
 # An expression is substituted textually before the shell ever sees the script,
