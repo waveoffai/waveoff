@@ -35,7 +35,7 @@ func TestContractDigestIsAttachedToCalls(t *testing.T) {
 	a.Record(toolRecord("s1", `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"jira.create_issue","arguments":{"summary":"x"}}}`,
 		`{"jsonrpc":"2.0","id":2,"result":{"content":[]}}`))
 
-	recs := c.all()
+	recs := c.atLeast(t, 1)
 	if len(recs) != 2 {
 		t.Fatalf("got %d records", len(recs))
 	}
@@ -60,7 +60,7 @@ func TestDescriptionChangeMovesTheContractDigest(t *testing.T) {
 		a := recorder.NewMCPAnnotator(c)
 		a.Record(toolRecord("s", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, toolsListResponse(description)))
 		a.Record(toolRecord("s", `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"jira.create_issue"}}`, `{}`))
-		return c.all()[1].ToolContractDigest
+		return c.atLeast(t, 2)[1].ToolContractDigest
 	}
 
 	benign := digestFor("File a Jira issue")
@@ -80,7 +80,7 @@ func TestContractsFromEventStream(t *testing.T) {
 	a.Record(toolRecord("s", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, sse))
 	a.Record(toolRecord("s", `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"jira.create_issue"}}`, `{}`))
 
-	if c.all()[1].ToolContractDigest == "" {
+	if c.atLeast(t, 2)[1].ToolContractDigest == "" {
 		t.Error("a tools/list delivered over SSE was not parsed; the real reference server answers this way")
 	}
 	if len(a.Contracts()) != 1 {
@@ -97,7 +97,7 @@ func TestModelPlaneIsUntouched(t *testing.T) {
 		Session: "s", Plane: recorder.PlaneModel,
 		ReqBody: []byte(`{"model":"claude-sonnet-4-6","messages":[]}`),
 	})
-	r := c.all()[0]
+	r := c.atLeast(t, 1)[0]
 	if r.MCPMethod != "" || r.ToolName != "" {
 		t.Errorf("model traffic was annotated as MCP: %+v", r)
 	}
@@ -116,7 +116,7 @@ func TestContractsFromMultiLineEventStream(t *testing.T) {
 	a.Record(toolRecord("s", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, sse))
 	a.Record(toolRecord("s", `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"jira.create_issue"}}`, `{}`))
 
-	if c.all()[1].ToolContractDigest == "" {
+	if c.atLeast(t, 2)[1].ToolContractDigest == "" {
 		t.Error("a tools/list split across several data: lines was not reassembled")
 	}
 }
@@ -127,7 +127,7 @@ func TestUnknownToolHasNoDigest(t *testing.T) {
 	// A call with no preceding tools/list: nothing is known, and inventing a
 	// digest would be worse than having none.
 	a.Record(toolRecord("s", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"mystery"}}`, `{}`))
-	r := c.all()[0]
+	r := c.atLeast(t, 1)[0]
 	if r.ToolName != "mystery" {
 		t.Errorf("tool name = %q", r.ToolName)
 	}
