@@ -60,6 +60,31 @@ type requestState struct {
 
 type ctxKey struct{}
 
+// DefaultTransport is the round tripper a proxy uses when none is given.
+//
+// It exists because http.DefaultTransport does not suit this job at all:
+// MaxIdleConnsPerHost is 2. An agent making three concurrent model calls keeps
+// two connections pooled and throws the rest away, so most calls pay a fresh
+// TCP handshake and a fresh TLS negotiation to the provider. Against an
+// external endpoint that is tens of milliseconds — on a component whose entire
+// adoption argument is a sub-5ms p99 overhead, and which is on the path of
+// every model call an agent makes.
+//
+// The pool is sized for a sidecar serving one agent process: generous enough
+// that concurrency does not evict connections, small enough to be unremarkable
+// in a pod's file-descriptor budget.
+//
+// Everything else is inherited from http.DefaultTransport rather than
+// reconstructed, so proxy-from-environment, dial timeouts and HTTP/2
+// negotiation keep working the way the standard library intends.
+func DefaultTransport() http.RoundTripper {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.MaxIdleConns = 256
+	t.MaxIdleConnsPerHost = 64
+	t.IdleConnTimeout = 90 * time.Second
+	return t
+}
+
 // New builds a proxy. It is safe for concurrent use once built.
 func New(p *Proxy) *Proxy {
 	if p.Sink == nil {
@@ -73,6 +98,9 @@ func New(p *Proxy) *Proxy {
 	}
 	if p.Redactor == nil {
 		p.Redactor = cassette.MustRedactor()
+	}
+	if p.Transport == nil {
+		p.Transport = DefaultTransport()
 	}
 
 	rp := &httputil.ReverseProxy{

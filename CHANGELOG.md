@@ -90,7 +90,15 @@ letting any of them roll anything back unattended.
 - **Session correlation by W3C trace context**, with `X-Waveoff-Session` as the
   escape hatch for runtimes that do not propagate it.
 - **OpenTelemetry export**, off unless an operator configures an endpoint.
-- Measured overhead: **p50 +0.22ms**, p99 within noise of an unrecorded proxy.
+- **Upstream connection pooling** sized for a sidecar. `http.DefaultTransport`
+  keeps two idle connections per host, so a reverse proxy inheriting it
+  re-handshakes on every concurrent call past the second — tens of milliseconds
+  against an external provider, on the component in front of every model call.
+- Measured overhead: **p50 +0.09ms, p99 +0.3ms**, against the 5ms p99 budget §9
+  calls an adoption blocker. The budget is asserted by a test that takes the
+  median of repeated measurements, because a single p99 over a few hundred
+  requests is an order statistic that one scheduler hiccup decides — and a gate
+  on an adoption blocker that cries wolf is one people learn to re-run.
 
 #### Replay
 
