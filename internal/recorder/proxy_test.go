@@ -271,7 +271,7 @@ func TestWithoutTraceContextSessionsAreDistinct(t *testing.T) {
 	}
 
 	seen := map[string]bool{}
-	for _, r := range c.all() {
+	for _, r := range c.atLeast(t, 3) {
 		if r.Session == "" {
 			t.Fatal("a record has no session")
 		}
@@ -378,8 +378,12 @@ func TestConcurrentSessionsKeepTheirOwnStepOrder(t *testing.T) {
 	}
 	wg.Wait()
 
+	// wg.Wait only says the clients are done. The sink is called after the
+	// response is delivered but before the handler returns, so the last record
+	// of a session can still be in flight — the same race that panicked
+	// TestExplicitSessionHeaderWins, showing up here as a short count.
 	bySession := map[string][]int{}
-	for _, r := range c.all() {
+	for _, r := range c.atLeast(t, sessions*steps) {
 		bySession[r.Session] = append(bySession[r.Session], r.Step)
 	}
 	if len(bySession) != sessions {
