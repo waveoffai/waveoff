@@ -75,7 +75,11 @@ type Reconciler struct {
 // SetupWithManager registers the controller.
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.Recorder == nil {
-		r.Recorder = mgr.GetEventRecorderFor("waveoff-rollout")
+		// GetEventRecorderFor is deprecated in favour of the newer events API.
+		// Migrating changes the Event objects this controller emits, and the
+		// WavedOff event is something operators alert on — so it is a change
+		// that deserves its own commit and its own release note.
+		r.Recorder = mgr.GetEventRecorderFor("waveoff-rollout") //nolint:staticcheck
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.AgentRollout{}).

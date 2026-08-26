@@ -196,6 +196,13 @@ letting any of them roll anything back unattended.
   Resampling them as independent understates variance and over-promotes; a
   clustered bootstrap is not implemented, so the shape that would silently break
   the test is rejected.
+- **Four controller-runtime APIs in use are deprecated** and acknowledged at
+  each call site: `scheme.Builder`, `GetEventRecorderFor`,
+  `admission.CustomDefaulter` and `webhook.CustomValidator`. The typed
+  `Validator[T]` and `Defaulter[T]` replacements would remove casts and are
+  worth taking, but the event-recorder migration changes the Event objects the
+  controller emits — and `WavedOff` is something operators alert on — so all
+  four belong in a change of their own rather than inside a dependency bump.
 - **Per-rollout scorer credentials are not configurable.** The HTTP scorer uses
   the manager's own environment. A namespace-scoped Role is the documented
   middle path and is not implemented.

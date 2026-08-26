@@ -138,7 +138,10 @@ func SetupWithManager(mgr ctrl.Manager, image string) error {
 	return nil
 }
 
-var _ admission.CustomDefaulter = &Injector{}
+// The untyped seam. admission.Defaulter[T] is the replacement and would be an
+// improvement — this injector casts to *corev1.Pod on entry — but migrating it
+// inside a dependency bump makes both changes harder to review.
+var _ admission.CustomDefaulter = &Injector{} //nolint:staticcheck
 
 // Default injects the sidecar.
 //
