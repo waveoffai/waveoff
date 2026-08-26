@@ -1,0 +1,109 @@
+# Fixtures for the sidecar injection end-to-end test.
+#
+# The agent is a curl loop rather than a real framework: the LangGraph
+# integration test already proves the recorder handles genuine framework
+# traffic, and what this test has to prove is different — that the injection
+# webhook wires a real sidecar into a real pod, that the base URL rewrite
+# actually redirects traffic, and that cassettes land on disk in the cluster.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fake-provider
+  labels: {app: fake-provider}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: fake-provider}
+  template:
+    metadata:
+      labels: {app: fake-provider}
+    spec:
+      containers:
+        - name: provider
+          image: waveoff-fakeprovider:e2e
+          imagePullPolicy: IfNotPresent
+          args: ["-listen", ":8000"]
+          ports: [{name: http, containerPort: 8000}]
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            initialDelaySeconds: 1
+            periodSeconds: 2
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fake-provider
+spec:
+  selector: {app: fake-provider}
+  ports: [{name: http, port: 8000, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recorded-agent
+  labels: {app: recorded-agent}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: recorded-agent}
+  template:
+    metadata:
+      labels: {app: recorded-agent}
+      annotations:
+        waveoff.ai/inject: "true"
+        waveoff.ai/container: agent
+        # The manifest is looked up so the cassette can name the version it was
+        # recorded against.
+        waveoff.ai/manifest: MANIFEST_NAME
+        # Where model traffic really goes. The webhook rewrites the agent's
+        # ANTHROPIC_BASE_URL to the sidecar and points the sidecar here.
+        # Short so the test can observe a flush; the default is two minutes.
+        waveoff.ai/session-idle: 10s
+        waveoff.ai/model-upstream: http://fake-provider.NAMESPACE.svc.cluster.local:8000
+    spec:
+      containers:
+        - name: agent
+          image: curlimages/curl:8.11.1
+          imagePullPolicy: IfNotPresent
+          env:
+            # Present so the webhook can tell which provider this agent uses.
+            # Its value is replaced with the sidecar's address.
+            - name: ANTHROPIC_API_KEY
+              value: sk-ant-fake-key-for-tests
+          # A fixed traceparent, so every call correlates into one session the
+          # way an instrumented agent's would.
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              echo "agent starting, base url is ${ANTHROPIC_BASE_URL:-unset}"
+              # Wait for the upstream provider. Without this the agent's first
+              # calls are recorded as 502s, which is correct behaviour by the
+              # recorder and noise for this test.
+              # The same traceparent as the real calls: without it these probes
+              # are correctly recorded as separate sessions of their own, which
+              # is right behaviour and noise for this test.
+              until curl -sS -o /dev/null "${ANTHROPIC_BASE_URL}/v1/messages" \
+                    -X POST -H 'content-type: application/json' \
+                    -H 'traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01' \
+                    -d '{"model":"m","messages":[]}' \
+                    -w '%{http_code}' 2>/dev/null | grep -q '^200$'; do
+                echo "waiting for the upstream"
+                sleep 2
+              done
+              echo "upstream ready"
+              i=0
+              while [ $i -lt 6 ]; do
+                curl -sS -o /dev/null -w "call %{http_code}\n" \
+                  -X POST "${ANTHROPIC_BASE_URL}/v1/messages" \
+                  -H 'content-type: application/json' \
+                  -H 'x-api-key: sk-ant-fake-key-for-tests' \
+                  -H 'traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01' \
+                  -d '{"model":"claude-sonnet-4-6","max_tokens":1024,"messages":[{"role":"user","content":"refund policy?"}]}' \
+                  || { echo "CALL_FAILED: the recorder was not ready, so the native sidecar ordering is broken"; exit 1; }
+                i=$((i+1))
+                sleep 2
+              done
+              echo AGENT_DONE
+              sleep 3600

@@ -1,0 +1,39 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: waveoff-manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - waveoff.ai
+  resources:
+  - agentmanifests
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - waveoff.ai
+  resources:
+  - agentrollouts
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - waveoff.ai
+  resources:
+  - agentrollouts/status
+  verbs:
+  - get
+  - patch
+  - update

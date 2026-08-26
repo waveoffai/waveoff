@@ -1,0 +1,78 @@
+# Egress confinement for a shadow pod.
+#
+# Write suppression in the recorder covers tools that go through the MCP proxy.
+# It cannot see anything else: an agent writing over plain HTTP, through a
+# database driver, an object-storage SDK, a message queue or the filesystem
+# bypasses the suppressor entirely. A shadow deployment without a policy like
+# this has a partial guarantee presented as a complete one, and the failure mode
+# is a candidate quietly writing to production while a dashboard says it is only
+# observing.
+#
+# The waveoff.ai/egress-confined annotation attests that a policy like this is
+# in place. Nothing in the webhook can verify it, which is exactly why it has to
+# be a deliberate act.
+#
+# WHAT THIS DOES AND DOES NOT CLOSE
+#
+# A NetworkPolicy selects pods, not containers, and the recorder sidecar runs in
+# the same pod as the agent. So the destinations the sidecar needs — the MCP
+# servers it proxies to, and the model provider — have to be allowed at pod
+# level, which means the agent container can reach them directly too, going
+# round the suppressor.
+#
+# What is closed: every other egress path. Databases, object storage, queues,
+# arbitrary HTTP APIs, anything on the internet. That is the large majority of
+# the ways a shadow candidate could write to production, and it is worth having.
+#
+# What is not closed: the agent talking to an allowed MCP server itself, without
+# the sidecar in between. Closing that needs policy that can distinguish two
+# containers in one pod — a sidecar-aware mesh, or an eBPF policy engine — which
+# is worth reaching for if your platform has it. Prefer that over this file.
+#
+# The alternative that needs no new machinery: point the shadow deployment at
+# staging MCP servers rather than production ones, so a direct call writes
+# somewhere nobody minds.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: shadow-agent-egress
+  namespace: prod
+spec:
+  podSelector:
+    matchLabels:
+      app: support-agent-shadow
+  policyTypes:
+    - Egress
+  egress:
+    # DNS. Without it the sidecar cannot resolve its own upstreams, and the
+    # shadow stage is perfectly safe and measures nothing.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # The tool plane. Label the MCP servers this agent is allowed to reach and
+    # nothing else — the narrower this selector, the more the policy is worth.
+    - to:
+        - podSelector:
+            matchLabels:
+              waveoff.ai/tool-plane: "true"
+
+    # The model provider. Usually off-cluster, so this is an address rather
+    # than a selector. Replace it with your own gateway's; leaving it as a wide
+    # CIDR would readmit most of what this policy exists to close.
+    #
+    # - to:
+    #     - ipBlock:
+    #         cidr: 10.0.0.0/8
+    #   ports:
+    #     - protocol: TCP
+    #       port: 443

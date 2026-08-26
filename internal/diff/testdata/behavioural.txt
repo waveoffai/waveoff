@@ -1,0 +1,28 @@
+
+  support-agent-6b1d4e8f2a01 → support-agent-7f3a9c2b4d10      4 planes changed · 3 unchanged
+
+  model      pin           2026-05-01 → 2026-08-01
+             temperature   0.2 → 0.7
+                           ↳ affects model output
+
+  prompts    system                2222… → bbbb…
+               ↳ affects model input
+
+! tools      jira.create_issue
+               contract      4444… → 9999…
+               ↳ description or schema changed · effect=write
+               ↳ affects model input · security-relevant
+             slack.post_message  ADDED
+               ↳ effect=write  replayPolicy=no-op
+               ↳ new tool can write
+               ↳ affects model input · security-relevant
+
+! judges     task-completion
+               model         claude-opus-4-1 → claude-opus-5
+               ↳ κ=0.71 measured 2026-08-01, against the OLD judge — stale
+               ↳ affects how the GATE scores
+
+  unchanged  code · retrieval · policy
+
+  behavioural change — 5 changes reach the model, 2 changes move the gate itself
+

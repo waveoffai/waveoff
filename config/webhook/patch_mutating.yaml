@@ -1,0 +1,31 @@
+# The opposite case to the validating webhook, and the reasoning is worth
+# keeping next to it.
+#
+# This one matches *every pod creation in the cluster*. It runs
+# failurePolicy: Ignore and excludes the system namespaces and its own, because
+# a recorder that fails to be configured is a missing recording, while a webhook
+# that blocks pod creation is an outage. Observability must never be able to
+# take down the thing it observes — including itself: without the waveoff-system
+# exclusion, a broken manager could not be rescheduled to fix itself.
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: mutating-webhook-configuration
+webhooks:
+  - name: inject.waveoff.ai
+    timeoutSeconds: 5
+    namespaceSelector:
+      matchExpressions:
+        # Self-exclusion is by label, not by name. The label is set in
+        # config/manager/namespace.yaml, so it follows the namespace wherever
+        # an operator moves it; a hardcoded name here would be left behind by
+        # the namespace transformer and silently stop excluding anything.
+        - key: waveoff.ai/exclude-admission
+          operator: DoesNotExist
+        # These names are fixed by Kubernetes and never move.
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values:
+            - kube-system
+            - kube-public
+            - kube-node-lease

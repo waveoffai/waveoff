@@ -1,0 +1,67 @@
+# An offline-replay rollout: replay a recorded corpus against both manifests,
+# score the outputs with whatever you already run, and decide.
+#
+# Nothing here touches production. Every session comes from a recording, every
+# tool read is served from that recording, and every write is refused — so this
+# is safe to run against a corpus captured from live traffic.
+apiVersion: waveoff.ai/v1alpha1
+kind: AgentRollout
+metadata:
+  name: support-agent-2026-08-26
+  namespace: default
+spec:
+  incumbentRef: support-agent-a875c0c15289
+  candidateRef: support-agent-b7ed494b4261
+
+  stages:
+    - name: replay
+      mode: offline-replay
+
+      corpus:
+        ref: /var/lib/waveoff/corpus
+        limit: 200
+
+      # Waveoff does not evaluate agents. This is where your existing eval
+      # tooling plugs in: refs on stdin, named metrics on stdout.
+      # See docs/scoring.md.
+      scorer:
+        exec:
+          command: python
+          args: ["/opt/evals/score.py"]
+        timeoutSeconds: 600
+
+      gate:
+        # Exactly one primary metric, carrying the full alpha. Gating eight
+        # metrics at 0.05 each gives roughly a 34% chance of a spurious
+        # rollback.
+        primary:
+          metric: task-completion
+          test: paired-bootstrap
+          direction: higher-is-better
+          # How much worse the candidate may be before this fails. There is no
+          # default: it is a judgement about your product that nobody else can
+          # make for you.
+          margin: -0.02
+          alpha: 0.05
+
+        # Guardrails are decisive. No improvement in task completion buys a
+        # policy violation.
+        guardrails:
+          - metric: policy-violations
+            test: threshold
+            direction: lower-is-better
+            threshold: 0
+
+          - metric: cost-per-completed-task
+            test: paired-bootstrap
+            direction: lower-is-better
+            margin: 0.15
+
+  # Leaving this empty uses the in-process analyzer. Point it at an endpoint to
+  # bring your own test; the controller does not care which answers.
+  # analyzer:
+  #   endpoint: http://my-analyzer.internal/analyze
+
+  rollback:
+    auto: true
+    retainIncumbentFor: 48h

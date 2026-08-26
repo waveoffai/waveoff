@@ -1,0 +1,38 @@
+# Dependency updates.
+#
+# Grouped rather than one PR per module. A dozen separate bumps is a dozen
+# separate CI runs and a dozen separate reviews of the same question, and the
+# practical result is that none of them get read properly.
+#
+# GitHub Actions are pinned to commit SHAs (see hack/check-pins.sh), so
+# dependabot updates the SHA and leaves the `# ratchet:` comment for a human to
+# reconcile. That is the intended friction: an action update is a supply-chain
+# change and should look like one.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      kubernetes:
+        patterns:
+          - "k8s.io/*"
+          - "sigs.k8s.io/*"
+      everything-else:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "k8s.io/*"
+          - "sigs.k8s.io/*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns:
+          - "*"

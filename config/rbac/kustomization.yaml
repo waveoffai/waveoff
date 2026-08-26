@@ -1,0 +1,7 @@
+# The manager reads AgentManifests so the injection webhook can stamp a
+# cassette with the version it was recorded against. That is the whole of its
+# cluster access: it writes nothing, and the validating webhook reads nothing.
+resources:
+  - service_account.yaml
+  - role.yaml
+  - role_binding.yaml

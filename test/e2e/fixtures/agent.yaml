@@ -1,0 +1,85 @@
+# Fixtures for the `waveoff pin` end-to-end case.
+#
+# Between them these exercise every input pin reads: a Deployment whose pod
+# template carries a mutable tag (so the running digest has to come from the
+# pod status), model configuration in the container environment, prompt bodies
+# in a mounted ConfigMap, and an mcp.json naming a live MCP server.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-config
+data:
+  system.md: |
+    You are a support agent.
+    Answer from the knowledge base, and escalate when you cannot.
+  notes.bin: "not a prompt; pin must ignore this"
+  mcp.json: |
+    {"mcpServers": {"everything": {"url": "http://mcp-everything.NAMESPACE.svc.cluster.local:3001/mcp"}}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-everything
+  labels: {app: mcp-everything}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: mcp-everything}
+  template:
+    metadata:
+      labels: {app: mcp-everything}
+    spec:
+      containers:
+        - name: server
+          # Built by hack/e2e.sh from fixtures/mcp-server.Dockerfile. The
+          # published mcp/everything image is pinned to a release that predates
+          # the streamable HTTP transport.
+          image: waveoff-mcp-everything:e2e
+          imagePullPolicy: IfNotPresent
+          ports: [{name: http, containerPort: 3001}]
+          readinessProbe:
+            tcpSocket: {port: http}
+            initialDelaySeconds: 2
+            periodSeconds: 2
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-everything
+spec:
+  selector: {app: mcp-everything}
+  ports: [{name: http, port: 3001, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: support-agent
+  labels: {app: support-agent}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: support-agent}
+  template:
+    metadata:
+      labels: {app: support-agent}
+    spec:
+      containers:
+        - name: agent
+          # A mutable tag on purpose. pin must resolve the digest of what is
+          # actually running instead of pinning this.
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "sleep 3600"]
+          env:
+            - name: ANTHROPIC_MODEL
+              value: claude-sonnet-4-6
+            - name: LLM_TEMPERATURE
+              value: "0.2"
+            - name: MAX_TOKENS
+              value: "4096"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/agent
+      volumes:
+        - name: config
+          configMap: {name: agent-config}

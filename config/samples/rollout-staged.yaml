@@ -1,0 +1,174 @@
+# A staged rollout: replay, then shadow, then a live canary.
+#
+# Each stage buys a different kind of evidence, and the order is the point.
+# Offline replay is free and touches nothing, so it goes first and catches the
+# obvious. Shadow meets real traffic shapes a corpus never captured, with every
+# write suppressed. Only the last stage lets a user's request actually be served
+# by the candidate — and by then two cheaper stages have already had a chance to
+# say no.
+#
+# Read docs/shadow.md before running the shadow stage. It has a precondition the
+# injection webhook will refuse to proceed without, and a stated limitation
+# about what it cannot see.
+apiVersion: waveoff.ai/v1alpha1
+kind: AgentRollout
+metadata:
+  name: support-agent-staged
+  namespace: default
+spec:
+  incumbentRef: support-agent-a875c0c15289
+  candidateRef: support-agent-b7ed494b4261
+
+  stages:
+    # ---------------------------------------------------------------------
+    # 1. Offline replay. Nothing in production is involved.
+    # ---------------------------------------------------------------------
+    - name: replay
+      mode: offline-replay
+      corpus:
+        ref: /var/lib/waveoff/corpus
+        limit: 200
+      scorer:
+        exec:
+          command: python
+          args: ["/opt/evals/score.py"]
+        timeoutSeconds: 600
+      gate:
+        primary:
+          metric: task-completion
+          test: paired-bootstrap
+          direction: higher-is-better
+          margin: -0.02
+          alpha: 0.05
+        guardrails:
+          - metric: policy-violations
+            test: threshold
+            direction: lower-is-better
+            threshold: 0
+
+    # ---------------------------------------------------------------------
+    # 2. Shadow. The candidate meets real requests and serves nobody.
+    # ---------------------------------------------------------------------
+    - name: shadow
+      mode: shadow
+
+      traffic:
+        router: gateway-api
+        routeRef: support-agent
+        incumbentBackend: support-agent-incumbent
+        candidateBackend: support-agent-candidate
+
+      # Gateway API mirrors a rule's traffic entirely or not at all, so this is
+      # 100 or 0. Istio can mirror a fraction.
+      mirrorPercent: 100
+
+      # Where the recorder writes the mirrored sessions. The same selector and
+      # the same scorer as the replay stage above, deliberately: a candidate
+      # measured on a different instrument than the incumbent produces a
+      # difference that belongs to the instruments.
+      corpus:
+        ref: /var/lib/waveoff/live
+      scorer:
+        exec:
+          command: python
+          args: ["/opt/evals/score.py"]
+        timeoutSeconds: 600
+
+      gate:
+        # Shadow is paired — both arms saw the same request — so a
+        # fixed-horizon test is valid here as long as it is read once. Use
+        # sequential if you intend to watch it continuously.
+        primary:
+          metric: task-completion
+          test: sequential
+          direction: higher-is-better
+          margin: -0.02
+          alpha: 0.05
+
+        guardrails:
+          - metric: policy-violations
+            test: threshold
+            direction: lower-is-better
+            threshold: 0
+
+      # Statistical sufficiency is not the same as having seen the traffic that
+      # matters. A stage satisfied in four minutes has not met the nightly batch
+      # or the Monday peak.
+      minObservationWindow: 24h
+
+      # A stage with no end is a candidate that ships by exhaustion.
+      maxDuration: 72h
+
+    # ---------------------------------------------------------------------
+    # 3. Live canary. Real users, real consequences.
+    # ---------------------------------------------------------------------
+    - name: canary
+      mode: live
+
+      # Five per cent. The blast radius of a candidate that turns out to be
+      # worse, for as long as it takes the gate to notice.
+      weight: 5
+
+      traffic:
+        router: gateway-api
+        routeRef: support-agent
+        incumbentBackend: support-agent-incumbent
+        candidateBackend: support-agent-candidate
+
+      corpus:
+        ref: /var/lib/waveoff/live
+      scorer:
+        exec:
+          command: python
+          args: ["/opt/evals/score.py"]
+        timeoutSeconds: 600
+
+      gate:
+        # `sequential` is mandatory for a live stage and the CRD enforces it. A
+        # canary is looked at continuously, and a fixed-horizon test peeked at
+        # repeatedly will eventually call a good candidate a regression.
+        #
+        # A live canary is also unpaired — each session is served by one arm and
+        # has no counterpart — so its interval is about 1.8x wider than shadow's
+        # on the same data. Expect it to need roughly three times the traffic to
+        # reach the same resolution. See docs/gating.md.
+        primary:
+          metric: task-completion
+          test: sequential
+          direction: higher-is-better
+          margin: -0.02
+          alpha: 0.05
+
+        guardrails:
+          - metric: policy-violations
+            test: threshold
+            direction: lower-is-better
+            threshold: 0
+
+          - metric: cost-per-completed-task
+            test: sequential
+            direction: lower-is-better
+            margin: 0.15
+
+      minObservationWindow: 24h
+      maxDuration: 168h
+
+  rollback:
+    # Off by default in the CRD. Turning it on means a candidate can be
+    # withdrawn without a human, which is the point of a canary — but it is a
+    # decision, not a default.
+    auto: true
+
+    # Which conditions withdraw. Empty means all of them.
+    triggers:
+      - gate-fail
+      - guardrail-violation
+      - budget-breach
+      - analyzer-unavailable
+      # Deterministic and available on the first session: the candidate reached
+      # for a class of write the incumbent never makes. See docs/gating.md.
+      - write-divergence
+
+    # Keep the incumbent deployed. Withdrawing is then a weight flip rather than
+    # a rebuild, which is what makes a rollback take seconds.
+    retainIncumbentFor: 48h

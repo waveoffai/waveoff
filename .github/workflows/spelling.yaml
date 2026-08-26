@@ -1,0 +1,43 @@
+name: spelling
+
+# Prose in this repository is load-bearing: the rejection messages, the CRD
+# field docs and the design notes are read by people deciding whether to trust
+# a promotion decision. A typo in a comment costs nothing; a typo in a
+# rejection message an operator has to act on at 2am costs something.
+#
+# It runs on demand and on documentation changes rather than on every push. A
+# spell checker that blocks a merge over a word it has not been taught is a
+# spell checker people learn to bypass — the fix is project-words.txt, and
+# adding a word to it is meant to be a small, unremarkable commit.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '**.md'
+      - 'docs/**'
+      - 'project-words.txt'
+      - '.cspell.json'
+  workflow_dispatch:
+
+concurrency:
+  group: spelling-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  cspell:
+    name: Spell check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # ratchet:actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: cspell
+        run: npx --yes cspell@9.8.0 --no-progress --show-suggestions "**/*.md"

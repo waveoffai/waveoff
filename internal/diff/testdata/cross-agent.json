@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "waveoff.ai/diff/v1alpha1",
+  "agentA": "support-agent",
+  "agentB": "billing-agent",
+  "nameA": "support-agent-6b1d4e8f2a01",
+  "nameB": "support-agent-7f3a9c2b4d10",
+  "behaviorDigest": {
+    "a": "sha256:\u003ca\u003e",
+    "b": "sha256:\u003cb\u003e"
+  },
+  "contentDigest": {
+    "a": "sha256:\u003ca\u003e",
+    "b": "sha256:\u003cb\u003e"
+  },
+  "verdict": "cross-agent",
+  "changes": []
+}

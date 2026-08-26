@@ -1,0 +1,21 @@
+# Hand-authored kubebuilder project metadata. The kubebuilder CLI is not a build
+# dependency: controller-gen and setup-envtest are pulled in as Go tool
+# dependencies instead, so a fresh checkout needs nothing but Go.
+domain: waveoff.ai
+layout:
+- go.kubebuilder.io/v4
+projectName: waveoff
+repo: github.com/waveoffai/waveoff
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: waveoff.ai
+  group: ""
+  kind: AgentManifest
+  path: github.com/waveoffai/waveoff/api/v1alpha1
+  version: v1alpha1
+  webhooks:
+    validation: true
+    webhookVersion: v1
+version: "3"

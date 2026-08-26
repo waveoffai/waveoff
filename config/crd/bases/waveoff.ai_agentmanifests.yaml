@@ -1,0 +1,309 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: agentmanifests.waveoff.ai
+spec:
+  group: waveoff.ai
+  names:
+    kind: AgentManifest
+    listKind: AgentManifestList
+    plural: agentmanifests
+    shortNames:
+    - am
+    singular: agentmanifest
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.agent
+      name: Agent
+      type: string
+    - jsonPath: .spec.model.id
+      name: Model
+      type: string
+    - jsonPath: .spec.behaviorDigest
+      name: Behavior
+      priority: 1
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          AgentManifest is an immutable, content-addressed pin of everything that
+          determines one agent's behaviour.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              AgentManifestSpec is the complete set of inputs that determine an agent's
+              behaviour, in one object, so that "roll back the agent" is unambiguous.
+
+              The spec is immutable once created. A change to any field is a new manifest
+              with a new name, never an edit to an existing one.
+            properties:
+              agent:
+                description: |-
+                  Agent is the stable logical name of the agent this manifest is a version
+                  of. It is part of the identity hash: without it, two unrelated agents
+                  that happen to share a configuration would collide in the corpus.
+                maxLength: 63
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
+              behaviorDigest:
+                description: |-
+                  BehaviorDigest is the identity hash: everything that determines
+                  behaviour, and nothing that does not. Two manifests with the same
+                  behaviorDigest are the same agent and a rollout between them needs no
+                  canary.
+
+                  It is supplied by the author, not computed at admission. `waveoff pin`
+                  emits it and `waveoff verify --write` repairs it; the webhook only
+                  checks it. Nothing rewrites the stored object, so GitOps sees no drift.
+
+                  Schema validation runs before validating webhooks, so a malformed digest
+                  is rejected here rather than by the webhook. That is the right order —
+                  it holds even if the webhook was never deployed — but it means this
+                  message, not the webhook's, is the one an operator reads. Hence CEL with
+                  a written-out message rather than a bare pattern.
+                type: string
+                x-kubernetes-validations:
+                - message: 'behaviorDigest must be a sha256 digest. Digests are authored,
+                    not computed at admission, so that nothing rewrites what you applied.
+                    Run: waveoff verify --write <file>'
+                  rule: self.matches('^sha256:[0-9a-f]{64}$')
+              code:
+                description: CodeSpec pins the agent's executable.
+                properties:
+                  image:
+                    description: |-
+                      Image is the container image running the agent. It must be digest-pinned
+                      (name@sha256:...); a mutable tag is rejected, because a manifest that
+                      cannot say which bytes ran is not a release artifact.
+                    minLength: 1
+                    type: string
+                required:
+                - image
+                type: object
+              contentDigest:
+                description: |-
+                  ContentDigest covers the whole spec with no exclusions. It is the
+                  tamper-evidence and compliance hash. Because only behaviorDigest has a
+                  classification map, a field misclassified there is still caught here.
+                type: string
+                x-kubernetes-validations:
+                - message: 'contentDigest must be a sha256 digest. Digests are authored,
+                    not computed at admission, so that nothing rewrites what you applied.
+                    Run: waveoff verify --write <file>'
+                  rule: self.matches('^sha256:[0-9a-f]{64}$')
+              judges:
+                items:
+                  description: |-
+                    JudgeSpec pins a judge. Judge configuration is part of the release artifact:
+                    if you gate on a judge, a silent judge model update is a release-blocking
+                    change disguised as a no-op.
+                  properties:
+                    calibration:
+                      description: |-
+                        JudgeCalibration records how well a judge agreed with the human gold set.
+
+                        This is a measurement, not a configuration input, so it is excluded from
+                        behaviorDigest: re-measuring kappa on an unchanged judge must not mint a new
+                        agent identity. It is still covered by contentDigest and still surfaces in
+                        waveoff diff, because a stale calibration is a release-blocking fact.
+                      properties:
+                        goldSetDigest:
+                          pattern: ^sha256:[0-9a-f]{64}$
+                          type: string
+                        kappa:
+                          type: number
+                        measuredAt:
+                          format: date-time
+                          type: string
+                      type: object
+                    model:
+                      minLength: 1
+                      type: string
+                    name:
+                      minLength: 1
+                      type: string
+                    rubricDigest:
+                      pattern: ^sha256:[0-9a-f]{64}$
+                      type: string
+                  required:
+                  - model
+                  - name
+                  - rubricDigest
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              model:
+                description: ModelSpec pins the model and how it is sampled.
+                properties:
+                  id:
+                    minLength: 1
+                    type: string
+                  params:
+                    description: |-
+                      ModelParams are the decoding parameters. Every numeric is a pointer because
+                      absent and zero are different behaviours: an unset temperature takes the
+                      provider default, while temperature 0 is greedy decoding.
+                    properties:
+                      maxTokens:
+                        format: int64
+                        type: integer
+                      stopSequences:
+                        items:
+                          type: string
+                        type: array
+                      temperature:
+                        type: number
+                      topK:
+                        format: int64
+                        type: integer
+                      topP:
+                        type: number
+                    type: object
+                  pin:
+                    description: Pin is the provider-side version pin, where the provider
+                      offers one.
+                    type: string
+                  provider:
+                    minLength: 1
+                    type: string
+                required:
+                - id
+                - provider
+                type: object
+              policy:
+                description: PolicySpec pins the authorization bundle.
+                properties:
+                  bundleDigest:
+                    pattern: ^sha256:[0-9a-f]{64}$
+                    type: string
+                required:
+                - bundleDigest
+                type: object
+              prompts:
+                items:
+                  description: PromptRef pins one prompt by content.
+                  properties:
+                    digest:
+                      description: Digest is the hash of the prompt body.
+                      pattern: ^sha256:[0-9a-f]{64}$
+                      type: string
+                    name:
+                      minLength: 1
+                      type: string
+                    source:
+                      description: |-
+                        Source is where the prompt came from. Provenance only: it is recorded and
+                        diffed, but excluded from behaviorDigest, so moving a prompt between
+                        repositories does not mint a new agent identity.
+                      type: string
+                  required:
+                  - digest
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              retrieval:
+                description: RetrievalSpec pins the retrieval side of the agent.
+                properties:
+                  embeddingModel:
+                    type: string
+                  indexSnapshot:
+                    description: |-
+                      IndexSnapshot names the index contents, not the index. Two snapshots are
+                      two different sets of retrievable documents.
+                    type: string
+                type: object
+              tools:
+                items:
+                  description: ToolRef pins one tool contract as the agent saw it.
+                  properties:
+                    contractDigest:
+                      description: |-
+                        ContractDigest hashes {name, description, inputSchema} as advertised at
+                        call time. The description is hashed because it is prompt input, which
+                        makes a silent description rewrite both a behavioural change and a
+                        detectable tool-poisoning attempt.
+                      pattern: ^sha256:[0-9a-f]{64}$
+                      type: string
+                    effect:
+                      description: |-
+                        Effect is mandatory and must be asserted by an operator. It is never
+                        inferred from server-advertised hints, because the server is the
+                        untrusted party in the tool-poisoning threat model.
+                      enum:
+                      - read
+                      - idempotent-write
+                      - write
+                      type: string
+                    name:
+                      minLength: 1
+                      type: string
+                    replayPolicy:
+                      description: ReplayPolicy says how a tool call is served when
+                        the manifest is replayed.
+                      enum:
+                      - snapshot
+                      - no-op
+                      - live
+                      type: string
+                    server:
+                      description: |-
+                        Server is the MCP endpoint serving this tool. Included in behaviorDigest:
+                        repointing an agent from a production to a staging server is a behaviour
+                        change even when the contract is byte-identical.
+                      type: string
+                  required:
+                  - contractDigest
+                  - effect
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+            required:
+            - agent
+            - behaviorDigest
+            - code
+            - contentDigest
+            - model
+            type: object
+            x-kubernetes-validations:
+            - message: AgentManifest spec is immutable; create a new manifest instead
+                of editing this one
+              rule: self == oldSelf
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources: {}

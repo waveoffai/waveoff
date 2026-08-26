@@ -1,0 +1,61 @@
+apiVersion: waveoff.ai/v1alpha1
+kind: AgentManifest
+metadata:
+  name: support-agent-a875c0c15289.6782f424 # filled in by waveoff verify --write
+  namespace: default
+  # Same behaviorDigest as incumbent.yaml — the same agent, served from a
+  # different registry — so the canonical name collides. The contentDigest
+  # suffix is the second legal name form, for exactly this case.
+spec:
+  agent: support-agent
+
+  # Both digests are authored, not computed at admission: nothing rewrites
+  # what you applied, so GitOps sees no drift and the hash an auditor reads
+  # was committed to git.
+  behaviorDigest: sha256:a875c0c152890e23f3bf1bf10a1126e48c392b8bc77d6515a45122f71a81394d
+  contentDigest: sha256:6782f4247b4e10a867c666a50d0c2aa31e32535003f8dd03077b8bc2b583f665
+
+  code:
+    image: mirror.example.com/team/support-agent@sha256:6b1d4e8f2a01000000000000000000000000000000000000000000000000000a
+
+  model:
+    provider: anthropic
+    id: claude-sonnet-4-6
+    pin: "2026-05-01"
+    params:
+      temperature: 0.2
+      maxTokens: 4096
+
+  prompts:
+    - name: system
+      source: git+ssh://git.internal/prompts.git//system.md@a1b2c3d
+      digest: sha256:11111111111111111111111111111111111111111111111111111111111111a1
+
+  tools:
+    - name: docs.search
+      server: https://docs-gw.internal/mcp
+      contractDigest: sha256:22222222222222222222222222222222222222222222222222222222222222a2
+      effect: read
+      replayPolicy: snapshot
+
+    - name: jira.create_issue
+      server: https://jira-gw.internal/mcp
+      contractDigest: sha256:33333333333333333333333333333333333333333333333333333333333333a3
+      effect: write
+      replayPolicy: no-op
+
+  retrieval:
+    indexSnapshot: snap-2026-08-19T04:00Z
+    embeddingModel: voyage-3
+
+  policy:
+    bundleDigest: sha256:44444444444444444444444444444444444444444444444444444444444444a4
+
+  judges:
+    - name: task-completion
+      model: claude-opus-4-1
+      rubricDigest: sha256:55555555555555555555555555555555555555555555555555555555555555a5
+      calibration:
+        kappa: 0.78
+        goldSetDigest: sha256:66666666666666666666666666666666666666666666666666666666666666a6
+        measuredAt: "2026-08-20T00:00:00Z"

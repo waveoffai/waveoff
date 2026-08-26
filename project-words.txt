@@ -1,0 +1,147 @@
+# Words this project uses that a general dictionary does not know.
+#
+# Two kinds live here: domain vocabulary the project has decided on, and the
+# names of things it talks to. Adding a word is cheap; a spell checker nobody
+# can satisfy is one everybody switches off.
+
+# The project's own vocabulary.
+missingness
+recomputable
+canonicaliser
+introspects
+bypassable
+agentmanifests
+chokepoints
+uncalibrated
+writable
+vendoring
+Vendoring
+waveoff
+Waveoff
+WavedOff
+cassettes
+incumbent
+canary
+canaries
+guardrail
+guardrails
+
+# Identifiers this project does not own and must not respell. `behavior` is the
+# CRD field `behaviorDigest`; `analyzer` is the Go interface. Renaming either to
+# suit a dictionary would break the thing it names.
+behavior
+analyzer
+analyzers
+omitempty
+cutoff
+
+# Kubernetes and the ecosystem.
+kubebuilder
+kustomize
+envtest
+controller-runtime
+kubectl
+CRDs
+webhooks
+istio
+Istio
+istiod
+kindnet
+kindnetd
+cainjector
+webhook
+finalizer
+namespaces
+unstructured
+apiextensions
+apiserver
+metav
+corev
+appsv
+admissionv
+networkingv
+runtimeclass
+ipBlock
+podSelector
+namespaceSelector
+sessionPersistence
+HTTPRoute
+VirtualService
+DestinationRule
+kubeconfig
+kubelet
+kustomization
+httproutes
+validatingwebhookconfiguration
+
+# Protocols and formats.
+OTLP
+semconv
+traceparent
+jsonrpc
+NDJSON
+streamable
+elicitation
+sse
+
+# Eval vendors named in docs/scoring.md. Named because the scorer contract is
+# only meaningful if you can see it lining up with tools people already run.
+Braintrust
+braintrust
+Promptfoo
+
+# Statistics.
+Bernstein
+Bonferroni
+McNemar
+bootstrapped
+resample
+resamples
+resampling
+anytime
+kappa
+Ramdas
+Waudby
+inferiority
+noninferiority
+heteroscedastic
+
+# Tooling.
+golangci
+gofmt
+goimports
+gopls
+staticcheck
+ineffassign
+errcheck
+bodyclose
+copyloopvar
+unconvert
+misspell
+goconst
+nilerr
+cspell
+reviewdog
+ratchet
+langgraph
+LangGraph
+httpx
+HTTPX
+aiohttp
+contextvars
+ainvoke
+Instrumentor
+gendocs
+anthropic
+Anthropic
+opentelemetry
+distroless
+gcflags
+ldflags
+trimpath
+GOARCH
+GOOS
+sysexits
+
+# The module path's organisation handle, which appears in import paths.
+waveoffai

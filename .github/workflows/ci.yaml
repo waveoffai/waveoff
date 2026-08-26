@@ -1,0 +1,181 @@
+name: ci
+
+# Every action is pinned to a commit SHA rather than a tag, with the tag kept
+# in a trailing comment so a human can still read it. A tag is mutable: the
+# same `@v4` can mean different code tomorrow, which is exactly the argument
+# this project makes about container images in an AgentManifest. Making it in
+# the README and then not doing it here would be an odd position to hold.
+#
+# hack/check-pins.sh enforces it; `make update-pins` re-resolves the comments.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    # Documentation-only changes are answered by ci-docs.yaml, which reports
+    # the same check names so a required-status rule is still satisfied.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+# One run per ref. A superseded run tells you about code nobody is proposing
+# any more, and the queue it occupies is the queue the current code is waiting
+# in.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Unit and API-server tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # ratchet:actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Boundary and licence checks
+        # The licensing boundary, the no-telemetry rule and the naming rule are
+        # promises made in the README. A regulated buyer verifies them by
+        # reading the source, so they are enforced here rather than in review.
+        run: make lint-boundary
+
+      - run: go vet ./...
+
+      - name: Generated files are current
+        # docs/digest.md is generated from the classification map. A rationale
+        # that has drifted from the code it describes is worse than none.
+        run: make verify-generated
+
+      - name: Unit and property tests
+        run: make test-unit
+
+      - name: Recorder latency budget
+        # §9 sets a <5ms p99 overhead budget and calls it an adoption blocker.
+        # TestOverheadBudget asserts it; this also records the raw numbers in
+        # the log so a slow drift is visible before it breaches.
+        run: make bench
+
+      - name: API server tests
+        # Covers the hazard no unit test can: values round-trip through the API
+        # server, which re-decodes every number, and through server-side apply,
+        # which owns fields.
+        run: make test-envtest
+
+      - name: Sample manifests are sealed
+        run: make verify-samples
+
+      - name: Rendered manifests are valid
+        run: |
+          kubectl kustomize config/default > /tmp/rendered.yaml
+          test -s /tmp/rendered.yaml
+          grep -q 'failurePolicy: Fail' /tmp/rendered.yaml
+
+      - name: Deployment namespace is configurable
+        # The certificate SANs and the ca-injector annotation embed the
+        # namespace inside other values, where kustomize's namespace
+        # transformer cannot reach. Getting that wrong gives a webhook that
+        # cannot complete a TLS handshake, which under failurePolicy: Fail
+        # rejects every AgentManifest in the cluster.
+        run: make check-namespace
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # ratchet:actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Action pins
+        # A mutable action tag is the same hazard as a mutable image tag, and
+        # this repository refuses those in a manifest. See hack/check-pins.sh.
+        run: make check-pins
+
+      - name: golangci-lint
+        run: make lint-go
+
+  integration:
+    name: LangGraph integration
+    # Drives the recorder with a genuine LangGraph agent against a fake model
+    # endpoint. Everything between the framework and the recorder is real; only
+    # the model is not, which keeps this hermetic and free.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # ratchet:actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # ratchet:actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # ratchet:actions/setup-node@v4
+        with:
+          # The tool plane is tested against the official MCP reference server,
+          # which npx fetches.
+          node-version: "22"
+      - run: make langgraph-env
+      - run: make test-integration
+
+  e2e:
+    name: End-to-end
+    # A real cluster: the webhook served by a real Deployment behind a real
+    # Service, with a certificate from cert-manager and a CA bundle injected
+    # into the webhook configuration. That wiring is what breaks in an install
+    # and no other job here can see it.
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # ratchet:actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: End-to-end
+        run: make test-e2e
+
+  build:
+    name: Build and CLI smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # ratchet:actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make build
+      - name: CLI smoke test
+        run: |
+          ./bin/waveoff verify config/samples/incumbent.yaml
+          # A behavioural change must exit 2, a registry migration must exit 1.
+          ./bin/waveoff diff config/samples/incumbent.yaml config/samples/candidate.yaml && exit 1 || test $? -eq 2
+          ./bin/waveoff diff config/samples/incumbent.yaml config/samples/registry-migration.yaml && exit 1 || test $? -eq 1
+          ./bin/waveoff diff config/samples/incumbent.yaml config/samples/incumbent.yaml

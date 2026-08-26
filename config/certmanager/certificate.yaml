@@ -1,0 +1,25 @@
+# Serving certificate for the webhook, issued by cert-manager.
+#
+# The CA bundle is injected into the ValidatingWebhookConfiguration by
+# cert-manager's ca-injector, via the annotation in config/default.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: waveoff-selfsigned
+  namespace: waveoff-system
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: waveoff-webhook-cert
+  namespace: waveoff-system
+spec:
+  secretName: waveoff-webhook-cert
+  dnsNames:
+    - waveoff-webhook.waveoff-system.svc
+    - waveoff-webhook.waveoff-system.svc.cluster.local
+  issuerRef:
+    kind: Issuer
+    name: waveoff-selfsigned

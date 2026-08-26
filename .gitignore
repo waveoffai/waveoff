@@ -1,0 +1,7 @@
+/bin/
+/dist/
+*.test
+cover.out
+.waveoff-*
+.venv/
+.venv

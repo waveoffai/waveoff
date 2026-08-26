@@ -1,0 +1,73 @@
+# Fixtures for the shadow end-to-end test.
+#
+# The agent is a curl loop rather than a real framework, for the same reason the
+# injection fixtures are: what this test has to prove is not that an agent
+# works, but that a write leaving a real pod through a real sidecar never
+# reaches the real MCP server behind it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shadow-tools
+  labels: {app: shadow-tools}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: shadow-tools}
+  template:
+    metadata:
+      # The label the sample egress policy allows out to. The sidecar has to
+      # reach the MCP servers it proxies, and a NetworkPolicy selects pods
+      # rather than containers, so this is the narrowest the allowance gets.
+      labels: {app: shadow-tools, waveoff.ai/tool-plane: "true"}
+    spec:
+      containers:
+        - name: mcp
+          image: waveoff-mcp-everything:e2e
+          imagePullPolicy: IfNotPresent
+          ports: [{name: http, containerPort: 3001}]
+          readinessProbe:
+            tcpSocket: {port: http}
+            initialDelaySeconds: 2
+            periodSeconds: 2
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shadow-tools
+spec:
+  selector: {app: shadow-tools}
+  ports: [{name: http, port: 3001, targetPort: http}]
+---
+# The candidate. It carries both the shadow annotation and the egress
+# attestation, so the webhook injects; the companion test proves what happens
+# when the attestation is missing.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shadow-agent
+  labels: {app: shadow-agent}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: shadow-agent}
+  template:
+    metadata:
+      labels: {app: shadow-agent}
+      annotations:
+        waveoff.ai/inject: "true"
+        waveoff.ai/container: agent
+        waveoff.ai/manifest: MANIFEST_NAME
+        waveoff.ai/shadow: "true"
+        waveoff.ai/egress-confined: "true"
+        waveoff.ai/session-idle: 10s
+        waveoff.ai/model-upstream: http://fake-provider.NAMESPACE.svc.cluster.local:8000
+        waveoff.ai/tool-upstreams: everything=http://shadow-tools.NAMESPACE.svc.cluster.local:3001/mcp
+    spec:
+      containers:
+        - name: agent
+          image: curlimages/curl:8.11.1
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ANTHROPIC_API_KEY
+              value: sk-ant-fake-key-for-tests
+          command: ["sh", "-c", "sleep 3600"]

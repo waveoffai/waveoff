@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: waveoff-system
+  labels:
+    app.kubernetes.io/name: waveoff
+    # The webhook runs with failurePolicy: Fail and must never be able to block
+    # its own namespace's pods from starting.
+    waveoff.ai/exclude-admission: "true"

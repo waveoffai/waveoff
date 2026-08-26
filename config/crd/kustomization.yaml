@@ -1,0 +1,3 @@
+resources:
+  - bases/waveoff.ai_agentmanifests.yaml
+  - bases/waveoff.ai_agentrollouts.yaml

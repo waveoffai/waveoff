@@ -1,0 +1,111 @@
+# golangci-lint configuration.
+#
+# The selection is deliberately small. A linter that fires on style produces
+# diffs nobody learns anything from, and a noisy lint job is one people stop
+# reading — which is how the two or three findings that mattered get scrolled
+# past. What is enabled here either catches a bug or catches a promise this
+# project makes in its own documentation.
+version: "2"
+
+run:
+  timeout: 5m
+  build-tags:
+    - e2e
+
+linters:
+  default: none
+  enable:
+    # Correctness.
+    - govet
+    - staticcheck
+    - ineffassign
+    - errcheck
+    - bodyclose      # a leaked response body is a leaked connection, and this
+                     # codebase proxies for a living
+    - nilerr         # `if err != nil { return nil }` is how a failure becomes
+                     # a silent pass, which for a promotion gate is the worst
+                     # failure mode there is
+    - unconvert
+    - unused
+    # Hygiene.
+    - misspell
+    - goconst
+    - copyloopvar
+
+  settings:
+    errcheck:
+      # `_ = f()` is this codebase's way of writing "the error here is
+      # deliberately ignored, and I have thought about why". Flagging it would
+      # turn a decision back into noise, so the assignment form is accepted
+      # and the bare call is not.
+      check-blank: false
+      exclude-functions:
+        # `defer f.Close()` on something being read from. There is nothing to
+        # do with the error: the read already succeeded or already failed, and
+        # the caller has been told which. A `defer func() { _ = ... }()`
+        # wrapper on each of these buys nothing and hides the ones that matter.
+        #
+        # Closing a *writer* is a different thing — a failed close can mean
+        # data never reached the disk — and those are checked. See
+        # internal/replay/driver.go, where a failed close on the candidate's
+        # output cassette would be read downstream as a worse candidate rather
+        # than as a truncated recording.
+        - (io.Closer).Close
+        - (io.ReadCloser).Close
+        - (*os.File).Close
+        - os.Remove
+    misspell:
+      # The prose here is British. Identifiers are not ours to respell: the MCP
+      # protocol's method is `notifications/initialized`, the CRD field is
+      # `behaviorDigest`, and the environment variable everyone honours is
+      # NO_COLOR. Renaming any of those to suit a linter would break the thing
+      # they name.
+      locale: UK
+      ignore-rules:
+        - Analyze
+        - analyze
+        - Analyzer
+        - center
+        - organization
+        - initialize
+        - initialized
+        - initializing
+        - initialization
+        - behavior
+        - behavioral
+        - color
+        - artifact
+        - artifacts
+        - serialize
+        - serialized
+        - normalize
+        - normalized
+        - canceled
+    goconst:
+      min-len: 12
+      min-occurrences: 5
+
+  exclusions:
+    generated: lax
+    rules:
+      - path: _test\.go
+        linters:
+          # A test asserts on errors by failing; a discarded error in setup or
+          # cleanup is noise rather than a finding. A response body left open
+          # in a test that exits moments later is not a leak anybody will
+          # observe, and closing it obscures what the test is about.
+          - errcheck
+          - bodyclose
+          - goconst
+          - unused
+      - path: _test\.go
+        text: "SA1019"
+        linters:
+          # Deprecated APIs in tests are usually there because the test is
+          # asserting on the behaviour of the thing that deprecated them.
+          - staticcheck
+
+output:
+  formats:
+    text:
+      print-linter-name: true

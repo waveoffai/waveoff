@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: waveoff-manager
+  namespace: waveoff-system
+  labels:
+    app.kubernetes.io/name: waveoff
+    app.kubernetes.io/component: manager
+spec:
+  # Two replicas because the webhook runs with failurePolicy: Fail. A single
+  # replica being rescheduled would reject every AgentManifest in the cluster
+  # for the duration.
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: waveoff
+      app.kubernetes.io/component: manager
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: waveoff
+        app.kubernetes.io/component: manager
+    spec:
+      serviceAccountName: waveoff-manager
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: waveoff
+              app.kubernetes.io/component: manager
+      containers:
+        - name: manager
+          image: ghcr.io/waveoffai/waveoff-manager:latest
+          # IfNotPresent so a locally built image — a kind load, an air-gapped
+          # mirror — is used rather than re-pulled. The default for the :latest
+          # tag is Always, which fails in both cases.
+          imagePullPolicy: IfNotPresent
+          args:
+            - --health-probe-bind-address=:8081
+            - --webhook-port=9443
+            # The image the injection webhook adds to opted-in pods. It must
+            # be resolvable from the nodes, not just from wherever the manager
+            # was built.
+            - --recorder-image=$(RECORDER_IMAGE)
+            # Rollouts are only reconciled when the manager has somewhere to
+            # send the model traffic a replay generates. Unset, AgentRollouts
+            # are accepted and left alone rather than accepted and held.
+            - --model-upstream=$(MODEL_UPSTREAM)
+            - --corpus-root=/var/lib/waveoff/corpus
+            - --output-root=/var/lib/waveoff/replays
+            - --blob-dir=/var/lib/waveoff/blobs
+          env:
+            - name: RECORDER_IMAGE
+              value: ghcr.io/waveoffai/waveoff-recorder:latest
+            - name: MODEL_UPSTREAM
+              value: ""
+          ports:
+            - name: webhook
+              containerPort: 9443
+              protocol: TCP
+            - name: probe
+              containerPort: 8081
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          livenessProbe:
+            httpGet: {path: /healthz, port: probe}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            # Gates on the serving certificate being loaded. A replica that
+            # reported ready before it could serve TLS would reject everything.
+            httpGet: {path: /readyz, port: probe}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 10m, memory: 64Mi}
+            limits: {memory: 128Mi}
+          volumeMounts:
+            - name: cert
+              mountPath: /tmp/k8s-webhook-server/serving-certs
+              readOnly: true
+            # The corpus a rollout replays, and where it writes its outputs.
+            # An emptyDir here means recordings die with the manager; point it
+            # at a claim to keep a corpus.
+            - name: corpus
+              mountPath: /var/lib/waveoff
+      volumes:
+        - name: cert
+          secret:
+            secretName: waveoff-webhook-cert
+            defaultMode: 420
+        - name: corpus
+          emptyDir: {}

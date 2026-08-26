@@ -1,0 +1,14 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: waveoff-manager-rolebinding
+  labels:
+    app.kubernetes.io/name: waveoff
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: waveoff-manager-role
+subjects:
+  - kind: ServiceAccount
+    name: waveoff-manager
+    namespace: waveoff-system

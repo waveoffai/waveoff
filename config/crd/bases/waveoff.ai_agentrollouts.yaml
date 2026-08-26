@@ -1,0 +1,605 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: agentrollouts.waveoff.ai
+spec:
+  group: waveoff.ai
+  names:
+    kind: AgentRollout
+    listKind: AgentRolloutList
+    plural: agentrollouts
+    shortNames:
+    - aro
+    singular: agentrollout
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.incumbentRef
+      name: Incumbent
+      type: string
+    - jsonPath: .spec.candidateRef
+      name: Candidate
+      type: string
+    - jsonPath: .status.reason
+      name: Reason
+      priority: 1
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          AgentRollout compares a candidate manifest against the incumbent and decides
+          whether it may be promoted.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: AgentRolloutSpec is a comparison between two manifests.
+            properties:
+              analyzer:
+                description: |-
+                  AnalyzerSpec selects what makes the promotion decision.
+
+                  The controller does not know or care which implementation answers. Leaving
+                  this empty uses the in-process analyzer; pointing it at an endpoint lets a
+                  team bring their own test without forking.
+                properties:
+                  endpoint:
+                    description: Endpoint receives the analysis request. Empty means
+                      in-process.
+                    type: string
+                  timeoutSeconds:
+                    type: integer
+                type: object
+              candidateRef:
+                minLength: 1
+                type: string
+              incumbentRef:
+                description: IncumbentRef and CandidateRef name AgentManifests in
+                  this namespace.
+                minLength: 1
+                type: string
+              rollback:
+                description: RollbackSpec configures automatic wave-off.
+                properties:
+                  auto:
+                    description: |-
+                      Auto withdraws the candidate without a human when a trigger fires.
+
+                      Withdrawing means returning all traffic to the incumbent. It is a weight
+                      flip, not a rebuild, which is the whole reason the incumbent is retained.
+                    type: boolean
+                  retainIncumbentFor:
+                    description: |-
+                      RetainIncumbentFor keeps the incumbent available after promotion, so
+                      going back is a weight flip rather than a rebuild.
+                    type: string
+                  triggers:
+                    description: |-
+                      Triggers are the conditions that withdraw a candidate. Empty means all
+                      of them.
+                    items:
+                      description: RollbackTrigger is a condition that withdraws a
+                        candidate.
+                      enum:
+                      - gate-fail
+                      - guardrail-violation
+                      - budget-breach
+                      - analyzer-unavailable
+                      - write-divergence
+                      type: string
+                    type: array
+                type: object
+              stages:
+                description: Stages run in order. A stage that fails stops the rollout.
+                items:
+                  description: Stage is one step of a rollout.
+                  properties:
+                    corpus:
+                      description: Corpus selects the recorded sessions an offline
+                        replay runs against.
+                      properties:
+                        limit:
+                          description: Limit caps how many sessions are replayed.
+                            Zero means all of them.
+                          type: integer
+                        ref:
+                          description: |-
+                            Ref names a corpus store.
+
+                            Required by offline replay, where it is the recorded traffic to replay.
+                            Optional for a live or shadow stage, where it names the store the
+                            recorder is writing production sessions into — the same selector and the
+                            same scorer, so that a candidate is measured on one instrument rather
+                            than compared across two.
+                          type: string
+                        sessions:
+                          description: Sessions replays exactly these, for reproducing
+                            one result.
+                          items:
+                            type: string
+                          type: array
+                      type: object
+                    gate:
+                      description: Gate decides whether a stage passes.
+                      properties:
+                        guardrails:
+                          description: |-
+                            Guardrails must all hold. A guardrail failure is decisive: no amount of
+                            improvement in the primary metric buys a policy violation.
+                          items:
+                            description: GateMetric is one thing a gate tests.
+                            properties:
+                              alpha:
+                                description: |-
+                                  Alpha is the false-positive rate. Defaults to 0.05 for the primary
+                                  metric; guardrails are corrected for multiplicity.
+                                type: number
+                              direction:
+                                description: MetricDirection says which way a metric
+                                  is good.
+                                enum:
+                                - higher-is-better
+                                - lower-is-better
+                                type: string
+                              margin:
+                                description: |-
+                                  Margin is the non-inferiority bound: how much worse the candidate may be
+                                  before this fails.
+
+                                  You almost never need "the candidate is better", you need "not worse by
+                                  more than I can accept". On a higher-is-better metric a margin of -0.02
+                                  tolerates a two-point drop. There is deliberately no default: the value
+                                  is a judgement about your product that nobody else can make.
+                                type: number
+                              metric:
+                                description: Metric is the name the scorer reports.
+                                  The vocabulary is yours.
+                                minLength: 1
+                                type: string
+                              test:
+                                description: GateTest names a statistical procedure.
+                                enum:
+                                - threshold
+                                - paired-bootstrap
+                                - sequential
+                                type: string
+                              threshold:
+                                description: Threshold is the bound for a threshold
+                                  test.
+                                type: number
+                            required:
+                            - metric
+                            - test
+                            type: object
+                          type: array
+                        kappaFloor:
+                          description: |-
+                            KappaFloor is the agreement with the human gold set below which a judge
+                            is not trusted to decide this release.
+
+                            Every number this gate compares came from a judge, and a judge is a
+                            measuring instrument with its own error. If its agreement has drifted, or
+                            was measured against a different judge model than the one about to run,
+                            the comparison is precise about a quantity nobody validated — which is
+                            worse than not gating, because it produces something that looks like
+                            evidence. Defaults to 0.6.
+                          type: number
+                        primary:
+                          description: |-
+                            Primary is the metric the promotion decision turns on. Exactly one.
+
+                            Gating eight metrics at alpha 0.05 each gives roughly a 34% chance of a
+                            spurious rollback. One primary metric carries the full alpha; everything
+                            else belongs in guardrails, under a stricter correction.
+                          properties:
+                            alpha:
+                              description: |-
+                                Alpha is the false-positive rate. Defaults to 0.05 for the primary
+                                metric; guardrails are corrected for multiplicity.
+                              type: number
+                            direction:
+                              description: MetricDirection says which way a metric
+                                is good.
+                              enum:
+                              - higher-is-better
+                              - lower-is-better
+                              type: string
+                            margin:
+                              description: |-
+                                Margin is the non-inferiority bound: how much worse the candidate may be
+                                before this fails.
+
+                                You almost never need "the candidate is better", you need "not worse by
+                                more than I can accept". On a higher-is-better metric a margin of -0.02
+                                tolerates a two-point drop. There is deliberately no default: the value
+                                is a judgement about your product that nobody else can make.
+                              type: number
+                            metric:
+                              description: Metric is the name the scorer reports.
+                                The vocabulary is yours.
+                              minLength: 1
+                              type: string
+                            test:
+                              description: GateTest names a statistical procedure.
+                              enum:
+                              - threshold
+                              - paired-bootstrap
+                              - sequential
+                              type: string
+                            threshold:
+                              description: Threshold is the bound for a threshold
+                                test.
+                              type: number
+                          required:
+                          - metric
+                          - test
+                          type: object
+                      required:
+                      - primary
+                      type: object
+                    maxDuration:
+                      description: |-
+                        MaxDuration bounds the stage. A canary with no end is a candidate that
+                        ships by exhaustion.
+                      type: string
+                    minObservationWindow:
+                      description: |-
+                        MinObservationWindow is how long a live or shadow stage must run before
+                        its verdict is acted on, however quickly the numbers look conclusive.
+
+                        Statistical sufficiency is not the same as having seen the traffic that
+                        matters. A canary promoted in four minutes has not met the nightly batch,
+                        the Monday morning peak, or the customer whose sessions are unlike
+                        everyone else's.
+                      type: string
+                    mirrorPercent:
+                      description: |-
+                        MirrorPercent is the share of traffic copied to the candidate during a
+                        shadow stage. Gateway API mirrors a whole rule or none of it, so only 0
+                        and 100 are honoured there; Istio accepts any percentage.
+                      maximum: 100
+                      minimum: 0
+                      type: integer
+                    mode:
+                      description: StageMode is how a stage exercises the candidate.
+                      enum:
+                      - offline-replay
+                      - shadow
+                      - live
+                      type: string
+                    name:
+                      minLength: 1
+                      type: string
+                    scorer:
+                      description: |-
+                        ScorerSpec says where scores come from.
+
+                        Waveoff does not evaluate agents; it consumes scores from whatever you
+                        already run. Exactly one of Exec or HTTP is set.
+                      properties:
+                        exec:
+                          description: |-
+                            ExecScorerSpec runs a scorer as a subprocess: refs on stdin, results on
+                            stdout.
+                          properties:
+                            args:
+                              items:
+                                type: string
+                              type: array
+                            command:
+                              minLength: 1
+                              type: string
+                          required:
+                          - command
+                          type: object
+                        http:
+                          description: |-
+                            HTTPScorerSpec posts to a scoring service.
+
+                            Credentials are not configured here yet. They are given to the manager at
+                            deploy time from its own environment, because letting a rollout name any
+                            Secret would require a controller that already mutates every pod to be able
+                            to read every Secret in the cluster.
+
+                            The middle path, when per-rollout credentials are needed: a namespace-scoped
+                            Role granting Secret read only in the rollout's own namespace, bound
+                            per-namespace by the operator. That is a far smaller grant than cluster-wide
+                            and preserves a tenant boundary — which matters, because shared manager
+                            credentials mean every tenant's rollouts score through the same identity.
+                          properties:
+                            endpoint:
+                              minLength: 1
+                              type: string
+                          required:
+                          - endpoint
+                          type: object
+                        timeoutSeconds:
+                          description: |-
+                            TimeoutSeconds bounds a scoring run. A scorer that hangs must not hang a
+                            rollout.
+                          type: integer
+                      type: object
+                    traffic:
+                      description: Traffic is required by the shadow and live stages.
+                      properties:
+                        candidateBackend:
+                          minLength: 1
+                          type: string
+                        incumbentBackend:
+                          description: |-
+                            IncumbentBackend and CandidateBackend are the backends already present on
+                            that route. A rollout reweights what is there; it does not add backends
+                            nobody configured.
+                          minLength: 1
+                          type: string
+                        routeRef:
+                          description: RouteRef is the HTTPRoute or VirtualService
+                            to control.
+                          minLength: 1
+                          type: string
+                        router:
+                          description: |-
+                            Router selects the implementation. The controller talks to an interface
+                            and never to a mesh, so a cluster can change one without changing this.
+                          enum:
+                          - gateway-api
+                          - istio
+                          type: string
+                      required:
+                      - candidateBackend
+                      - incumbentBackend
+                      - routeRef
+                      - router
+                      type: object
+                    weight:
+                      description: |-
+                        Weight is the share of live traffic the candidate receives, in percent.
+                        Only meaningful for a live stage.
+                      maximum: 100
+                      minimum: 0
+                      type: integer
+                  required:
+                  - gate
+                  - mode
+                  - name
+                  - scorer
+                  type: object
+                  x-kubernetes-validations:
+                  - message: an offline-replay stage needs a corpus to replay
+                    rule: self.mode != 'offline-replay' || (has(self.corpus) && size(self.corpus.ref)
+                      > 0)
+                  - message: a live stage routes real traffic and needs a traffic
+                      block
+                    rule: self.mode != 'live' || has(self.traffic)
+                  - message: a shadow stage mirrors real traffic and needs a traffic
+                      block
+                    rule: self.mode != 'shadow' || has(self.traffic)
+                  - message: a live canary is watched continuously, so its gate must
+                      use the sequential test; a fixed-horizon test is not valid under
+                      repeated peeking
+                    rule: self.mode != 'live' || self.gate.primary.test == 'sequential'
+                minItems: 1
+                type: array
+            required:
+            - candidateRef
+            - incumbentRef
+            - stages
+            type: object
+            x-kubernetes-validations:
+            - message: incumbentRef and candidateRef are the same manifest; there
+                is nothing to compare
+              rule: self.incumbentRef != self.candidateRef
+          status:
+            description: AgentRolloutStatus is the observed state.
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              observedGeneration:
+                format: int64
+                type: integer
+              phase:
+                description: RolloutPhase is where a rollout has got to.
+                enum:
+                - Pending
+                - Running
+                - Promoted
+                - WavedOff
+                - Held
+                - Failed
+                type: string
+              reason:
+                type: string
+              stages:
+                items:
+                  description: StageStatus records what happened in one stage.
+                  properties:
+                    analyzer:
+                      description: |-
+                        Analyzer identifies what decided, so a promotion can be traced back to
+                        the thing that made it.
+                      type: string
+                    excluded:
+                      type: integer
+                    finishedAt:
+                      format: date-time
+                      type: string
+                    name:
+                      type: string
+                    phase:
+                      description: RolloutPhase is where a rollout has got to.
+                      enum:
+                      - Pending
+                      - Running
+                      - Promoted
+                      - WavedOff
+                      - Held
+                      - Failed
+                      type: string
+                    reason:
+                      type: string
+                    rolledBack:
+                      description: RolledBack records that the candidate was withdrawn,
+                        and why.
+                      type: boolean
+                    scored:
+                      type: integer
+                    sessions:
+                      description: |-
+                        Sessions is how many corpus items were replayed, and Scored how many
+                        produced a usable measurement under both arms.
+
+                        Both are recorded because they are usually different, and the difference
+                        is the difference between a result and an illusion: a gate that scored 40
+                        of 400 items looks identical to one that scored all 400.
+                      type: integer
+                    startedAt:
+                      format: date-time
+                      type: string
+                    trigger:
+                      description: RollbackTrigger is a condition that withdraws a
+                        candidate.
+                      enum:
+                      - gate-fail
+                      - guardrail-violation
+                      - budget-breach
+                      - analyzer-unavailable
+                      - write-divergence
+                      type: string
+                    verdict:
+                      description: Verdict is the analyzer's decision, rendered for
+                        a human.
+                      type: string
+                    weight:
+                      description: |-
+                        Weight is the share of live traffic the candidate held when this stage
+                        finished, read back from the router rather than assumed.
+                      type: integer
+                    writeActivity:
+                      description: |-
+                        WriteActivity is what each arm tried to do to the world.
+
+                        Reported on every step of a shadow or live stage, whether or not it
+                        fired. A stage where nothing was ever attempted either had no write tools
+                        or was not actually watching, and those look identical without this.
+                      properties:
+                        candidateAttempts:
+                          type: string
+                        candidateSessions:
+                          type: integer
+                        droppedClasses:
+                          description: |-
+                            DroppedClasses are write tools the incumbent used and the candidate did
+                            not. Reported, never a violation: a candidate that writes less may have
+                            got better or may have got lazier, and only a scorer tells those apart.
+                          items:
+                            type: string
+                          type: array
+                        incumbentAttempts:
+                          description: |-
+                            IncumbentAttempts and CandidateAttempts are write attempts per session,
+                            so two arms that saw different amounts of traffic are not compared as
+                            though they had not.
+                          type: string
+                        incumbentSessions:
+                          description: Sessions counted on each arm.
+                          type: integer
+                        newClasses:
+                          description: |-
+                            NewClasses are write tools the candidate reached for and the incumbent
+                            never did. Non-empty is a guardrail violation on its own.
+                          items:
+                            type: string
+                          type: array
+                      type: object
+                  required:
+                  - name
+                  - phase
+                  type: object
+                type: array
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

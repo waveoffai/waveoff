@@ -1,0 +1,74 @@
+# A shadow deployment of an agent candidate.
+#
+# This is the pod the shadow stage of a rollout mirrors traffic to. The
+# annotations are the whole story; read docs/shadow.md before using it, because
+# two of them are load-bearing in ways that are not obvious.
+#
+# The injection webhook refuses this pod — skipping injection with a reason
+# rather than blocking the deployment — if either the manifest classifies no
+# tools or `waveoff.ai/egress-confined` is absent. Both refusals exist for the
+# same reason: a shadow deployment that is safe and useless looks identical from
+# outside to one that is working.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: support-agent-shadow
+  namespace: prod
+  labels:
+    app: support-agent-shadow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: support-agent-shadow
+  template:
+    metadata:
+      labels:
+        app: support-agent-shadow
+      annotations:
+        waveoff.ai/inject: "true"
+        waveoff.ai/container: agent
+
+        # The manifest this candidate is running. The sidecar reads its tool
+        # classifications from here, which is what tells it which calls to
+        # suppress — so a manifest that classifies nothing means a sidecar that
+        # refuses everything.
+        waveoff.ai/manifest: support-agent-b7ed494b4261
+
+        # Suppress writes. Every tool classified `write` or `idempotent-write`
+        # is answered without being executed, and every unclassified tool is
+        # refused. Without this, mirroring means the candidate files the ticket,
+        # sends the email and charges the card exactly as production does.
+        waveoff.ai/shadow: "true"
+
+        # An attestation that this pod's egress is confined to the sidecar's
+        # proxies — see config/samples/shadow-egress.yaml.
+        #
+        # Nothing in a webhook can verify it, which is exactly why it has to be
+        # a deliberate act. Suppression covers what goes through the MCP proxy
+        # and nothing else: direct HTTP, database drivers, object storage,
+        # queues and the filesystem all bypass it. Setting this without applying
+        # a policy is asserting something untrue about your own cluster.
+        waveoff.ai/egress-confined: "true"
+
+        # Where the recorder forwards to, and where it writes.
+        waveoff.ai/model-upstream: https://api.anthropic.com
+        waveoff.ai/tool-upstreams: jira=https://jira-gw.internal/mcp,docs=https://docs-gw.internal/mcp
+        waveoff.ai/corpus-claim: waveoff-live-corpus
+
+        # Export spans to your own collector. Off unless you set it: a recorder
+        # that dials out to somewhere nobody configured is the thing this
+        # project promises never to do.
+        # waveoff.ai/otlp-endpoint: otel-collector.observability:4317
+    spec:
+      containers:
+        - name: agent
+          image: registry.internal/support-agent@sha256:b7ed494b4261000000000000000000000000000000000000000000000000cafe
+          env:
+            # Present so the webhook can tell which provider this agent uses.
+            # Its value is rewritten to the sidecar's loopback address.
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: anthropic
+                  key: api-key

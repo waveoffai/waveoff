@@ -1,0 +1,10 @@
+
+  refusing to diff across agents
+
+  left  is a version of "support-agent"
+  right is a version of "billing-agent"
+
+  These are different agents, so "what changed" has no meaningful answer
+  and neither does the verdict. Pass --force if you meant to compare them
+  anyway.
+

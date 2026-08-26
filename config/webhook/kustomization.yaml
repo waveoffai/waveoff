@@ -1,0 +1,11 @@
+resources:
+  - manifests.yaml
+  - service.yaml
+
+patches:
+  - path: patch_validating.yaml
+    target:
+      kind: ValidatingWebhookConfiguration
+  - path: patch_mutating.yaml
+    target:
+      kind: MutatingWebhookConfiguration

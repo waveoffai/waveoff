@@ -1,0 +1,109 @@
+name: ci-docs
+
+# Reports the same check names as ci.yaml for documentation-only changes.
+#
+# ci.yaml skips those paths, and a skipped workflow reports no status at all —
+# so a branch rule requiring those checks would block every docs PR forever,
+# waiting for a run that is never going to start. This answers instead.
+#
+# The link check is the one job here that actually does something. It runs on
+# the markdown a PR changed rather than the whole tree, because a link that was
+# already broken is not this PR's problem and failing on it teaches people to
+# ignore the job.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-docs-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Unit and API-server tests
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "documentation-only change: no code to test"
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "documentation-only change: no code to lint"
+
+  integration:
+    name: LangGraph integration
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "documentation-only change: no code to exercise"
+
+  e2e:
+    name: End-to-end
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "documentation-only change: no cluster needed"
+
+  build:
+    name: Build and CLI smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "documentation-only change: nothing to build"
+
+  links:
+    name: Documentation links
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check links in changed markdown
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          if [ -n "${BASE_REF:-}" ]; then
+            files=$(git diff --name-only --diff-filter=d "origin/${BASE_REF}...HEAD" -- '*.md' || true)
+          else
+            files=$(git ls-files '*.md')
+          fi
+          if [ -z "$files" ]; then
+            echo "no markdown changed"
+            exit 0
+          fi
+          echo "$files"
+          # Relative links only. An external site being down is not a reason to
+          # block a merge, and a job that fails for reasons outside the
+          # repository is a job people learn to re-run without reading.
+          status=0
+          for f in $files; do
+            dir=$(dirname "$f")
+            # Extract markdown link targets, drop anchors and external schemes.
+            grep -oE '\]\([^)]+\)' "$f" | sed 's/^](//; s/)$//' \
+              | grep -vE '^(https?|mailto):' | sed 's/#.*$//' | grep -v '^$' \
+              | while read -r target; do
+                  case "$target" in
+                    /*) resolved=".${target}" ;;
+                    *)  resolved="${dir}/${target}" ;;
+                  esac
+                  if [ ! -e "$resolved" ]; then
+                    echo "::error file=${f}::broken link to ${target}"
+                    exit 1
+                  fi
+                done || status=1
+          done
+          exit $status

@@ -1,0 +1,14 @@
+# There is deliberately no namespaceSelector here. The usual advice to exclude
+# kube-system exists for webhooks intercepting core resources, where a broken
+# webhook can stop the cluster booting. This one matches only
+# waveoff.ai/agentmanifests, which no namespace needs in order to start, so an
+# exclusion would protect against nothing while creating a namespace where
+# unverified manifests can be created. Digest verification is the entire
+# security property of that object; it should have no bypass.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: validating-webhook-configuration
+webhooks:
+  - name: vagentmanifest.waveoff.ai
+    timeoutSeconds: 5

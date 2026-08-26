@@ -1,0 +1,103 @@
+{
+  "schemaVersion": "waveoff.ai/diff/v1alpha1",
+  "agentA": "support-agent",
+  "agentB": "support-agent",
+  "nameA": "support-agent-6b1d4e8f2a01",
+  "nameB": "support-agent-7f3a9c2b4d10",
+  "behaviorDigest": {
+    "a": "sha256:\u003ca\u003e",
+    "b": "sha256:\u003cb\u003e"
+  },
+  "contentDigest": {
+    "a": "sha256:\u003ca\u003e",
+    "b": "sha256:\u003cb\u003e"
+  },
+  "verdict": "behavioural",
+  "changes": [
+    {
+      "plane": "model",
+      "field": "pin",
+      "op": "changed",
+      "from": "2026-05-01",
+      "to": "2026-08-01",
+      "tags": [
+        "model"
+      ]
+    },
+    {
+      "plane": "model",
+      "field": "temperature",
+      "op": "changed",
+      "from": "0.2",
+      "to": "0.7",
+      "tags": [
+        "model"
+      ]
+    },
+    {
+      "plane": "prompts",
+      "element": "system",
+      "op": "changed",
+      "from": "2222…",
+      "to": "bbbb…",
+      "tags": [
+        "input"
+      ]
+    },
+    {
+      "plane": "tools",
+      "element": "jira.create_issue",
+      "field": "contract",
+      "op": "changed",
+      "from": "4444…",
+      "to": "9999…",
+      "tags": [
+        "input",
+        "security"
+      ],
+      "detail": [
+        "description or schema changed · effect=write"
+      ],
+      "severity": true
+    },
+    {
+      "plane": "tools",
+      "element": "slack.post_message",
+      "op": "added",
+      "tags": [
+        "input",
+        "security"
+      ],
+      "detail": [
+        "effect=write  replayPolicy=no-op",
+        "new tool can write"
+      ],
+      "severity": true
+    },
+    {
+      "plane": "judges",
+      "element": "task-completion",
+      "field": "model",
+      "op": "changed",
+      "from": "claude-opus-4-1",
+      "to": "claude-opus-5",
+      "tags": [
+        "gate"
+      ],
+      "severity": true
+    },
+    {
+      "plane": "judges",
+      "element": "task-completion",
+      "field": "calibration",
+      "op": "changed",
+      "tags": [
+        "gate"
+      ],
+      "detail": [
+        "κ=0.71 measured 2026-08-01, against the OLD judge — stale"
+      ],
+      "severity": true
+    }
+  ]
+}

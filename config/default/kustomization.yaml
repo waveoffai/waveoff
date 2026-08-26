@@ -1,0 +1,113 @@
+# The namespace is set here and nowhere else.
+#
+# Everything downstream is derived from it by the replacements below, because
+# two of these references are strings embedded inside other values, and
+# kustomize's namespace transformer does not reach into those. Both failures
+# are silent and total: a certificate whose SANs name the wrong namespace, or a
+# ca-injector annotation pointing at a Certificate that does not exist, gives a
+# webhook that cannot complete a TLS handshake — and with failurePolicy: Fail
+# that rejects every AgentManifest in the cluster.
+#
+# To deploy elsewhere, change this field here:
+#
+#   cd config/default && kustomize edit set namespace waveoff-prod
+#
+# Not from a wrapping overlay. Kustomize resolves this kustomization's
+# replacements before an outer namespace transformer runs, so an overlay moves
+# the resources but leaves the derived strings behind — which is precisely the
+# broken state described above. hack/check-namespace.sh proves the supported
+# path stays working.
+namespace: waveoff-system
+
+resources:
+  - ../crd
+  - ../rbac
+  - ../manager
+  - ../webhook
+  - ../certmanager
+
+# Overridden by hack/e2e.sh, and by anyone running their own build:
+#   cd config/default && kustomize edit set image ghcr.io/waveoffai/waveoff-manager=my/image:tag
+images:
+  - name: ghcr.io/waveoffai/waveoff-manager
+    newName: ghcr.io/waveoffai/waveoff-manager
+    newTag: latest
+
+patches:
+  - path: inject_ca.yaml
+    target:
+      kind: ValidatingWebhookConfiguration
+  - path: inject_ca_mutating.yaml
+    target:
+      kind: MutatingWebhookConfiguration
+
+replacements:
+  # The webhook's clientConfig points at the Service.
+  - source:
+      kind: Service
+      name: waveoff-webhook
+      fieldPath: metadata.name
+    targets:
+      - select: {kind: ValidatingWebhookConfiguration}
+        fieldPaths: [webhooks.*.clientConfig.service.name]
+      - select: {kind: MutatingWebhookConfiguration}
+        fieldPaths: [webhooks.*.clientConfig.service.name]
+  - source:
+      kind: Service
+      name: waveoff-webhook
+      fieldPath: metadata.namespace
+    targets:
+      - select: {kind: ValidatingWebhookConfiguration}
+        fieldPaths: [webhooks.*.clientConfig.service.namespace]
+      - select: {kind: MutatingWebhookConfiguration}
+        fieldPaths: [webhooks.*.clientConfig.service.namespace]
+
+  # The certificate's SANs must match the Service's in-cluster DNS names, or
+  # the API server aborts the handshake before the webhook sees anything.
+  - source:
+      kind: Service
+      name: waveoff-webhook
+      fieldPath: metadata.name
+    targets:
+      - select: {kind: Certificate, group: cert-manager.io}
+        fieldPaths: [spec.dnsNames.*]
+        options: {delimiter: ".", index: 0}
+  - source:
+      kind: Service
+      name: waveoff-webhook
+      fieldPath: metadata.namespace
+    targets:
+      - select: {kind: Certificate, group: cert-manager.io}
+        fieldPaths: [spec.dnsNames.*]
+        options: {delimiter: ".", index: 1}
+
+  # cert-manager's ca-injector reads "<namespace>/<name>" out of this
+  # annotation to find the Certificate whose CA it should inject.
+  - source:
+      kind: Certificate
+      group: cert-manager.io
+      name: waveoff-webhook-cert
+      fieldPath: metadata.namespace
+    targets:
+      - select: {kind: ValidatingWebhookConfiguration}
+        fieldPaths:
+          - "metadata.annotations.[cert-manager.io/inject-ca-from]"
+        options: {delimiter: "/", index: 0}
+      - select: {kind: MutatingWebhookConfiguration}
+        fieldPaths:
+          - "metadata.annotations.[cert-manager.io/inject-ca-from]"
+        options: {delimiter: "/", index: 0}
+  - source:
+      kind: Certificate
+      group: cert-manager.io
+      name: waveoff-webhook-cert
+      fieldPath: metadata.name
+    targets:
+      - select: {kind: ValidatingWebhookConfiguration}
+        fieldPaths:
+          - "metadata.annotations.[cert-manager.io/inject-ca-from]"
+        options: {delimiter: "/", index: 1}
+      - select: {kind: MutatingWebhookConfiguration}
+        fieldPaths:
+          - "metadata.annotations.[cert-manager.io/inject-ca-from]"
+        options: {delimiter: "/", index: 1}

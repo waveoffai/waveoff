@@ -1,0 +1,18 @@
+
+  support-agent-6b1d4e8f2a01 → support-agent-7f3a9c2b4d10      3 planes changed · 4 unchanged
+
+  code       image         registry.internal/support-agent@1111… → mirror.example.com/team/support-agent@1111…
+                           ↳ same bytes, different registry — provenance only
+
+  prompts    system
+               source        git+ssh://git.internal/prompts@a1b2c3d → git+ssh://git.internal/platform-prompts@a1b2c3d
+               ↳ provenance only — same prompt body
+
+  judges     task-completion
+               κ             0.71 → 0.78
+               ↳ re-measured, judge unchanged — provenance only
+
+  unchanged  model · tools · retrieval · policy
+
+  provenance only — behaviourally identical, promotes without a canary
+
