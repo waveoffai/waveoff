@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Turn is one scripted response.
@@ -110,6 +111,11 @@ func (s *Server) json(w http.ResponseWriter, model string, turn Turn) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// interEventDelay separates streamed events so they cannot coalesce into one
+// segment. Small enough to be invisible in a test's runtime, large enough to
+// survive a loaded CI runner.
+const interEventDelay = 3 * time.Millisecond
+
 // stream emits the server-sent event sequence the Anthropic SDK expects, so the
 // streaming path through the recorder is exercised for real rather than
 // approximated.
@@ -125,6 +131,13 @@ func (s *Server) stream(w http.ResponseWriter, model string, turn Turn) {
 		if flush != nil {
 			flush.Flush()
 		}
+		// A flush is a request, not a guarantee. Events written back to back
+		// can still land in one TCP segment, and the proxy reading them then
+		// legitimately sees a single chunk — which is correct behaviour and an
+		// unprovable test. A real provider streams tokens as a model produces
+		// them, milliseconds apart; this reproduces that spacing so the
+		// streaming shape a test asserts on is one the network cannot flatten.
+		time.Sleep(interEventDelay)
 	}
 
 	emit("message_start", map[string]any{
