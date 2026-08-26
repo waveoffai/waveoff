@@ -16,7 +16,11 @@ var (
 	GroupVersion = schema.GroupVersion{Group: "waveoff.ai", Version: "v1alpha1"}
 
 	// SchemeBuilder is used to add go types to the GroupVersionKind scheme.
-	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}
+	// scheme.Builder is deprecated on the grounds that api packages should
+	// carry minimal dependencies. Replacing it means hand-rolling registration
+	// in generated boilerplate, which is a change worth making on its own
+	// rather than inside a dependency bump.
+	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion} //nolint:staticcheck
 
 	// AddToScheme adds the types in this group-version to the given scheme.
 	AddToScheme = SchemeBuilder.AddToScheme

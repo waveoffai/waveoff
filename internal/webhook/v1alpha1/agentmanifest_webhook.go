@@ -49,13 +49,21 @@ const EvidencePrefix = "waveoff.ai/evidence."
 // Validator implements admission validation for AgentManifest.
 type Validator struct{}
 
-var _ webhook.CustomValidator = &Validator{}
+var _ webhook.CustomValidator = &Validator{} //nolint:staticcheck
 
 // SetupWithManager registers the webhook.
+//
+// controller-runtime 0.24 made the builder generic: the object moves into the
+// constructor and `For` is gone. WithCustomValidator is the untyped seam, which
+// is the one this validator implements — a typed admission.Validator[T] would
+// let the casts below go, and is worth doing on its own rather than inside a
+// dependency bump.
 func SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(&v1alpha1.AgentManifest{}).
-		WithValidator(&Validator{}).
+	// The suppression sits on the first line of the chain because that is where
+	// staticcheck anchors a diagnostic about a method further down it.
+	//nolint:staticcheck // WithCustomValidator is the untyped seam; see above.
+	return ctrl.NewWebhookManagedBy(mgr, &v1alpha1.AgentManifest{}).
+		WithCustomValidator(&Validator{}).
 		Complete()
 }
 
