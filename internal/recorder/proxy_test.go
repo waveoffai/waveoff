@@ -36,6 +36,30 @@ func (c *collector) all() []*recorder.Record {
 	return out
 }
 
+// atLeast waits for n records before returning them.
+//
+// The sink is called on the request path after the response has been delivered
+// but before the handler returns, so a client that has read its body may still
+// be ahead of the recording. Indexing all() directly is a race that panics with
+// an index-out-of-range, taking down the whole test binary rather than failing
+// one case — which is how it was found: connection pooling shifted the timing
+// and CI caught it on a run where everything else passed.
+func (c *collector) atLeast(tb testing.TB, n int) []*recorder.Record {
+	tb.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		got := c.all()
+		if len(got) >= n {
+			return got
+		}
+		if time.Now().After(deadline) {
+			tb.Fatalf("only %d record(s) were captured, want at least %d", len(got), n)
+			return got
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
 func newProxy(t *testing.T, target string, sink recorder.Sink) *httptest.Server {
 	t.Helper()
 	u, err := url.Parse(target)
@@ -76,7 +100,7 @@ func TestProxyRecordsBothDirections(t *testing.T) {
 		t.Errorf("client received %q", got)
 	}
 
-	recs := c.all()
+	recs := c.atLeast(t, 1)
 	if len(recs) != 1 {
 		t.Fatalf("got %d records, want 1", len(recs))
 	}
@@ -148,7 +172,7 @@ func TestStreamingIsNotBuffered(t *testing.T) {
 	for time.Now().Before(deadline) && len(c.all()) == 0 {
 		time.Sleep(10 * time.Millisecond)
 	}
-	recs := c.all()
+	recs := c.atLeast(t, 1)
 	if len(recs) != 1 {
 		t.Fatalf("got %d records", len(recs))
 	}
@@ -188,7 +212,7 @@ func TestSessionFromTraceparent(t *testing.T) {
 		resp.Body.Close()
 	}
 
-	recs := c.all()
+	recs := c.atLeast(t, 1)
 	if len(recs) != 3 {
 		t.Fatalf("got %d records", len(recs))
 	}
@@ -221,7 +245,7 @@ func TestExplicitSessionHeaderWins(t *testing.T) {
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 
-	if got := c.all()[0].Session; got != "my-session" {
+	if got := c.atLeast(t, 1)[0].Session; got != "my-session" {
 		t.Errorf("session = %q, want the explicit header to win", got)
 	}
 }
@@ -289,7 +313,7 @@ func TestTruncationIsReported(t *testing.T) {
 		t.Errorf("client received %d bytes, want %d; a capture limit must not truncate the response", len(got), len(big))
 	}
 
-	r := c.all()[0]
+	r := c.atLeast(t, 1)[0]
 	if !r.RespTruncated {
 		t.Error("truncation was not reported")
 	}
@@ -312,7 +336,7 @@ func TestUpstreamFailureIsRecorded(t *testing.T) {
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 
-	recs := c.all()
+	recs := c.atLeast(t, 1)
 	if len(recs) != 1 {
 		t.Fatalf("got %d records; a failed call is still a recording", len(recs))
 	}

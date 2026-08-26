@@ -30,7 +30,7 @@ func TestHeadersAreRecordedAndRedacted(t *testing.T) {
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 
-	r := c.all()[0]
+	r := c.atLeast(t, 1)[0]
 	if r.ReqHeader.Get("x-api-key") == "sk-ant-api03-REALKEY1234567890abcdefgh" {
 		t.Error("the API key survived into the record")
 	}

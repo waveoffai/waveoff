@@ -94,11 +94,17 @@ letting any of them roll anything back unattended.
   keeps two idle connections per host, so a reverse proxy inheriting it
   re-handshakes on every concurrent call past the second — tens of milliseconds
   against an external provider, on the component in front of every model call.
-- Measured overhead: **p50 +0.09ms, p99 +0.3ms**, against the 5ms p99 budget §9
-  calls an adoption blocker. The budget is asserted by a test that takes the
-  median of repeated measurements, because a single p99 over a few hundred
-  requests is an order statistic that one scheduler hiccup decides — and a gate
-  on an adoption blocker that cries wolf is one people learn to re-run.
+- Measured overhead: **p50 +0.13ms, p99 +0.33ms** on two cores, against the 5ms
+  p99 budget §9 calls an adoption blocker.
+  
+  The budget is asserted by a test that takes the median of repeated
+  measurements, because a single p99 over a few hundred requests is an order
+  statistic one scheduler hiccup decides — and a gate on an adoption blocker
+  that cries wolf is one people learn to re-run. Its concurrency scales to the
+  machine, because the budget is a claim about what recording adds to one call
+  and that cannot be measured on a saturated box: eight in-flight requests on
+  two cores reported +1.2ms for the same code, which describes the hardware
+  rather than the recorder.
 
 #### Replay
 
