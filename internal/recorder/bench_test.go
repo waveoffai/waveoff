@@ -156,11 +156,29 @@ func TestOverheadBudget(t *testing.T) {
 	}
 
 	const (
-		requests    = 400
+		requests    = 2000
 		concurrency = 8
-		// §9's budget. Measured on the response a real model call produces
-		// rather than a trivial one.
+		// Repeat the whole measurement and take the median delta.
+		//
+		// A single p99 is an order statistic: with 400 requests it is the
+		// fourth-worst, so one GC pause or one scheduler hiccup in the recorded
+		// arm decides the result. Measured on a quiet laptop, the original
+		// shape of this test failed roughly one run in five while the actual
+		// overhead at p50 was zero — and on a shared CI runner it failed more.
+		//
+		// That matters more than it sounds. §9 calls this budget an adoption
+		// blocker, and a gate on an adoption blocker that cries wolf every
+		// fifth run is worse than no gate at all: people learn to re-run it,
+		// and then it no longer catches the regression it exists for. So the
+		// budget below is unchanged and the estimator is fixed instead.
+		repeats = 5
+		// §9's budget, on the response a real model call produces rather than a
+		// trivial one.
 		budget = 5 * time.Millisecond
+		// The median is stable enough to hold to a much tighter bound, and it
+		// is the number that actually describes the typical call. A real
+		// regression in the capture path moves this long before it moves p99.
+		medianBudget = 1 * time.Millisecond
 	)
 	up := upstream(t, 64<<10)
 	reqBody := strings.Repeat("q", 4<<10)
@@ -194,9 +212,6 @@ func TestOverheadBudget(t *testing.T) {
 		return out
 	}
 
-	off := measure(-1)
-	on := measure(recorder.DefaultCaptureLimit)
-
 	pct := func(d []time.Duration, p float64) time.Duration {
 		i := int(float64(len(d)) * p)
 		if i >= len(d) {
@@ -205,14 +220,43 @@ func TestOverheadBudget(t *testing.T) {
 		return d[i]
 	}
 
-	p50, p99 := pct(on, 0.50)-pct(off, 0.50), pct(on, 0.99)-pct(off, 0.99)
-	t.Logf("recording overhead over %d requests at concurrency %d, 64KB responses:", requests, concurrency)
-	t.Logf("  p50  %6.3fms  (%v -> %v)", float64(p50)/float64(time.Millisecond), pct(off, 0.50), pct(on, 0.50))
-	t.Logf("  p99  %6.3fms  (%v -> %v)", float64(p99)/float64(time.Millisecond), pct(off, 0.99), pct(on, 0.99))
+	var p50s, p99s []time.Duration
+	for r := 0; r < repeats; r++ {
+		// Alternating rather than all-off-then-all-on, so that a machine that
+		// gets busier partway through the test penalises both arms equally
+		// instead of only the one measured second.
+		off := measure(-1)
+		on := measure(recorder.DefaultCaptureLimit)
+		p50s = append(p50s, pct(on, 0.50)-pct(off, 0.50))
+		p99s = append(p99s, pct(on, 0.99)-pct(off, 0.99))
+		t.Logf("  run %d: p50 %+7.3fms   p99 %+7.3fms",
+			r+1, ms(p50s[r]), ms(p99s[r]))
+	}
+
+	p50, p99 := median(p50s), median(p99s)
+	t.Logf("median over %d runs of %d requests at concurrency %d, 64KB responses:",
+		repeats, requests, concurrency)
+	t.Logf("  p50  %+7.3fms", ms(p50))
+	t.Logf("  p99  %+7.3fms", ms(p99))
 
 	if p99 > budget {
 		t.Errorf("recording adds %v at p99, over the %v budget in §9.\n"+
 			"That budget is a stated adoption blocker, not a nice-to-have: a recorder that "+
 			"slows down every model call does not get deployed.", p99, budget)
 	}
+	if p50 > medianBudget {
+		t.Errorf("recording adds %v to the median call, over the %v this test holds it to.\n"+
+			"The median is the stable statistic here, so a move in it is a real regression in "+
+			"the capture path rather than a noisy runner.", p50, medianBudget)
+	}
 }
+
+// median of a slice of durations. Sorts a copy: the caller's ordering is the
+// order the runs happened in, which the log reports.
+func median(d []time.Duration) time.Duration {
+	c := append([]time.Duration(nil), d...)
+	sort.Slice(c, func(i, j int) bool { return c[i] < c[j] })
+	return c[len(c)/2]
+}
+
+func ms(d time.Duration) float64 { return float64(d) / float64(time.Millisecond) }
