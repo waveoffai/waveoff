@@ -374,3 +374,67 @@ func TestConcurrentSessionsKeepTheirOwnStepOrder(t *testing.T) {
 		}
 	}
 }
+
+// TestTheProxyPoolsUpstreamConnections.
+//
+// http.DefaultTransport keeps two idle connections per host. A reverse proxy
+// that inherits it throws away every connection past the second, so an agent
+// making three concurrent model calls pays a fresh TCP handshake and a fresh
+// TLS negotiation on most of them — tens of milliseconds against an external
+// provider, on the component that sits in front of every model call and whose
+// adoption argument is a sub-5ms p99.
+//
+// This was live for the whole of M1 and no unit test could see it: correctness
+// is unaffected, only latency, and the latency test that should have caught it
+// used too few requests for the cost to clear the noise. It surfaced when that
+// test was made a better estimator and promptly exhausted the machine's
+// ephemeral ports.
+func TestTheProxyPoolsUpstreamConnections(t *testing.T) {
+	p := recorder.New(&recorder.Proxy{
+		Upstream: mustURL(t, "http://example.internal"),
+		Plane:    recorder.PlaneModel,
+	})
+
+	tr, ok := p.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("the proxy has no *http.Transport to check: %T", p.Transport)
+	}
+	if tr.MaxIdleConnsPerHost <= 2 {
+		t.Errorf("MaxIdleConnsPerHost is %d, which is the standard library default. "+
+			"Every concurrent call past the second re-handshakes upstream.",
+			tr.MaxIdleConnsPerHost)
+	}
+	// Inherited rather than reconstructed: a hand-built transport silently
+	// drops proxy-from-environment and HTTP/2, both of which a deployment can
+	// depend on.
+	if !tr.ForceAttemptHTTP2 {
+		t.Error("the transport does not attempt HTTP/2, so it was built from scratch " +
+			"rather than cloned from http.DefaultTransport")
+	}
+	if tr.Proxy == nil {
+		t.Error("the transport ignores HTTP_PROXY, which a locked-down cluster may require")
+	}
+}
+
+// TestAnExplicitTransportIsRespected: the default must not overwrite what an
+// operator or a test deliberately supplied.
+func TestAnExplicitTransportIsRespected(t *testing.T) {
+	mine := &http.Transport{MaxIdleConnsPerHost: 7}
+	p := recorder.New(&recorder.Proxy{
+		Upstream:  mustURL(t, "http://example.internal"),
+		Plane:     recorder.PlaneModel,
+		Transport: mine,
+	})
+	if p.Transport != http.RoundTripper(mine) {
+		t.Error("the proxy replaced a transport it was given")
+	}
+}
+
+func mustURL(t *testing.T, s string) *url.URL {
+	t.Helper()
+	u, err := url.Parse(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u
+}
