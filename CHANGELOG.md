@@ -41,6 +41,10 @@ letting any of them roll anything back unattended.
   GitHub build-provenance attestations, verifiable with
   `gh attestation verify`. `hack/check-pins.sh` enforces all of it, and
   SECURITY.md states plainly what is still trusted and by whom.
+- **Dependencies** brought current before the release: Kubernetes libraries to
+  0.36.4 and controller-runtime to 0.24.1, whose generic webhook builder needed
+  the registration call rewritten; all six GitHub Actions bumped, each pin
+  verified against the tag it claims.
 - **CI** gained concurrency groups, path filters and named jobs, with a
   companion workflow that reports the same check names for documentation-only
   changes — a skipped workflow reports no status at all, which would block
