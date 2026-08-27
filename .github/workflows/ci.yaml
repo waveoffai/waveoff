@@ -162,7 +162,12 @@ jobs:
   build:
     name: Build and CLI smoke test
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Five cross-compiles, each pulling the whole Kubernetes dependency tree for
+    # a different GOOS/GOARCH with nothing shared between them. The release's
+    # own build step takes eleven minutes for the same work; a ten-minute cap
+    # here cancelled the job rather than failing it, which reads as a broken
+    # runner instead of a slow one.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7.0.1
         with:
