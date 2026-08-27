@@ -10,8 +10,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"syscall"
 	"time"
+
+	"github.com/waveoffai/waveoff/internal/procgroup"
 )
 
 // ExecScorer runs a scorer as a subprocess.
@@ -69,24 +70,13 @@ func (e *ExecScorer) Score(ctx context.Context, refs []Ref) ([]Result, error) {
 	cmd.Env = append(os.Environ(), e.Env...)
 	cmd.Stdin = bytes.NewReader(payload)
 
-	// Its own process group, killed as a group on cancellation.
+	// Killable as a whole, not just at the top.
 	//
 	// A scorer is usually a shell wrapper around something slower. Killing only
 	// the direct child leaves the grandchild alive holding the output pipes, so
 	// Run blocks until it finishes anyway and the timeout is decorative — a
 	// hanging judge would still hang the rollout it was supposed to protect.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		if pgid, err := syscall.Getpgid(cmd.Process.Pid); err == nil {
-			return syscall.Kill(-pgid, syscall.SIGKILL)
-		}
-		return cmd.Process.Kill()
-	}
-	// A backstop for anything that survives the signal and still holds a pipe.
-	cmd.WaitDelay = 5 * time.Second
+	procgroup.Isolate(cmd)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

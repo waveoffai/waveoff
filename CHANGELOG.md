@@ -221,6 +221,14 @@ letting any of them roll anything back unattended.
   worth taking, but the event-recorder migration changes the Event objects the
   controller emits — and `WavedOff` is something operators alert on — so all
   four belong in a change of their own rather than inside a dependency bump.
+- **Process-group kill is Unix-only.** A scorer or replayed agent is usually a
+  wrapper around something slower, and killing only the direct child leaves the
+  grandchild holding the output pipes — so the timeout does nothing and a
+  hanging judge hangs the rollout it was meant to protect. On Unix the child
+  gets its own process group and the group is signalled. Windows has no group
+  to signal, so cancellation kills the direct child only and a `WaitDelay`
+  keeps a stuck grandchild from blocking forever. A full guarantee there needs
+  a Job Object.
 - **Per-rollout scorer credentials are not configurable.** The HTTP scorer uses
   the manager's own environment. A namespace-scoped Role is the documented
   middle path and is not implemented.

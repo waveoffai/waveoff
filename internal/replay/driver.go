@@ -10,13 +10,13 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"syscall"
 	"time"
 
 	"github.com/waveoffai/waveoff/api/v1alpha1"
 	"github.com/waveoffai/waveoff/internal/cas"
 	"github.com/waveoffai/waveoff/internal/cassette"
 	"github.com/waveoffai/waveoff/internal/corpus"
+	"github.com/waveoffai/waveoff/internal/procgroup"
 )
 
 // Driver replays one recorded session against one manifest.
@@ -221,20 +221,10 @@ func (d *Driver) runAgent(ctx context.Context, addr string) error {
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 
-	// Its own process group, killed as a group. An agent is usually a wrapper
-	// around something slower, and killing only the direct child leaves the
-	// grandchild holding the pipes so the timeout does nothing.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		if pgid, err := syscall.Getpgid(cmd.Process.Pid); err == nil {
-			return syscall.Kill(-pgid, syscall.SIGKILL)
-		}
-		return cmd.Process.Kill()
-	}
-	cmd.WaitDelay = 5 * time.Second
+	// Killable as a whole. An agent is usually a wrapper around something
+	// slower, and killing only the direct child leaves the grandchild holding
+	// the pipes so the timeout does nothing.
+	procgroup.Isolate(cmd)
 	return cmd.Run()
 }
 
