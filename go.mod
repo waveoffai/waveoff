@@ -3,7 +3,7 @@ module github.com/waveoffai/waveoff
 go 1.26.2
 
 require (
-	github.com/gowebpki/jcs v1.0.1
+	github.com/gowebpki/jcs v1.0.2
 	github.com/minio/minio-go/v7 v7.3.0
 	github.com/spf13/cobra v1.10.2
 	go.opentelemetry.io/otel v1.46.0
